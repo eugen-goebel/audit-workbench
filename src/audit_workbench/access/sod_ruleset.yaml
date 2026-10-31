@@ -1,0 +1,49 @@
+# Segregation-of-duties ruleset.
+#
+# Conflicts are defined between business functions, never between people or
+# role names. A role can be renamed or restructured without touching this file.
+# The pairs below are common textbook examples of incompatible duties in a bank
+# (initiation vs. approval, maintenance of master data vs. use of it, trading
+# vs. settlement, development vs. production). They are illustrative, not a
+# complete or authoritative list.
+
+conflicts:
+  - id: SOD-PAY-01
+    functions: [PAYMENT_CREATE, PAYMENT_APPROVE]
+    severity: critical
+    description: Create and approve the same payment
+
+  - id: SOD-PAY-02
+    functions: [BENEFICIARY_MAINTAIN, PAYMENT_APPROVE]
+    severity: high
+    description: Change beneficiary bank details and approve payments to them
+
+  - id: SOD-CRD-01
+    functions: [CREDIT_ENTER, CREDIT_APPROVE]
+    severity: critical
+    description: Enter and approve the same credit decision
+
+  - id: SOD-CRD-02
+    functions: [LIMIT_MAINTAIN, CREDIT_APPROVE]
+    severity: high
+    description: Set approval limits and approve credits under them
+
+  - id: SOD-GL-01
+    functions: [GL_POST, GL_APPROVE]
+    severity: high
+    description: Post and approve manual journal entries
+
+  - id: SOD-TRD-01
+    functions: [TRADE_EXECUTE, TRADE_SETTLE]
+    severity: critical
+    description: Execute trades and settle them (front office vs. back office)
+
+  - id: SOD-TRD-02
+    functions: [TRADE_EXECUTE, LIMIT_MAINTAIN]
+    severity: high
+    description: Execute trades and maintain the limits that constrain them
+
+  - id: SOD-IT-01
+    functions: [USER_ADMIN, PAYMENT_APPROVE]
+    severity: critical
+    description: Administer user access and approve payments

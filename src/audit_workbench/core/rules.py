@@ -38,7 +38,10 @@ class Rule(ABC):
         evidence: list[str],
         details: dict[str, Any] | None = None,
         regulation_refs: list[str] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> Finding:
+        """Build a finding. `context` adds run-level inputs such as the audit
+        date to the recorded parameters, so the finding id depends on them."""
         return Finding(
             rule_id=self.rule_id,
             rule_version=self.version,
@@ -46,7 +49,7 @@ class Rule(ABC):
             entity=entity,
             description=description,
             evidence=evidence,
-            params=dict(self.params),
+            params={**self.params, **(context or {})},
             details=details or {},
             regulation_refs=regulation_refs or [],
         )
