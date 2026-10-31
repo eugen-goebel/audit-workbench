@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests with coverage
+        run: uv run pytest -v --cov=audit_workbench --cov-report=term-missing --cov-report=xml --cov-fail-under=90
+
+      - name: Coverage summary
+        if: always() && matrix.python-version == '3.12'
+        run: |
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          uv run python -c "import xml.etree.ElementTree as ET; print(f\"Line coverage: {float(ET.parse('coverage.xml').getroot().get('line-rate'))*100:.1f}%\")" >> "$GITHUB_STEP_SUMMARY"

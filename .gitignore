@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.env
+.venv/
+.vscode/
+.idea/
+.DS_Store
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated data and reports. The synthetic bank is rebuilt from a seed,
+# so generated files are never committed.
+output/
+data/generated/
