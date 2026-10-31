@@ -73,7 +73,7 @@ for the ground-truth comparison and must follow the format given here exactly.
 
 ### A-02 `dormant_account`: active but unused
 
-- **Population:** accounts with `status = active` and `interactive = true`, excluding accounts that are A-01 exceptions (a leaver is the stronger finding).
+- **Population:** accounts with `status = active` and `interactive = true`, excluding personal accounts of employees who have left (`exit_date < as_of`), independent of A-01's `grace_days`. A leaver is the stronger finding and is reported by A-01.
 - **Exception:** `last_login` is older than `as_of - dormant_days`, or `last_login` is empty and `created_at` is older than `as_of - dormant_days`.
 - **Params:** `as_of`, `dormant_days` (default 90).
 - **Entity:** `account_id`. **Severity:** MEDIUM.
