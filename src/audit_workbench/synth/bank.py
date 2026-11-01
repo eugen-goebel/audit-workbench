@@ -722,6 +722,7 @@ def _write(
     seed: int,
     issues: list[dict[str, str]],
     journal_issues: list[dict[str, str]] | None = None,
+    change_issues: list[dict[str, str]] | None = None,
 ) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -742,6 +743,13 @@ def _write(
         payload["journal_as_of"] = JOURNAL_AS_OF.isoformat()
         payload["issues"] = sorted(
             issues + journal_issues, key=lambda i: (i["rule_id"], i["entity"])
+        )
+    if change_issues is not None:
+        from audit_workbench.synth.change import CHANGE_AS_OF
+
+        payload["change_as_of"] = CHANGE_AS_OF.isoformat()
+        payload["issues"] = sorted(
+            payload["issues"] + change_issues, key=lambda i: (i["rule_id"], i["entity"])
         )
     (out_dir / "ground_truth.json").write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
@@ -764,5 +772,9 @@ def generate_bank(
 
         issues = inject_issues(bank)
     journal_issues, _ledger = _write_journal(bank, Path(out_dir), seed, inject)
-    _write(bank, Path(out_dir), seed, issues, journal_issues)
+    # Module C comes last, with its own random stream, so no A or B value moves.
+    from audit_workbench.synth.change import generate_change
+
+    change_issues = generate_change(bank, Path(out_dir), seed, inject, issues + journal_issues)
+    _write(bank, Path(out_dir), seed, issues, journal_issues, change_issues)
     return Path(out_dir)

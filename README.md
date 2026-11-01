@@ -7,7 +7,7 @@
 
 Data-driven IT audit tests for banks: access review, segregation of duties, journal entry testing and change management. Everything runs on a synthetic bank with known, injected issues, so every detection rule can be checked against ground truth.
 
-> **Status:** module A (access review and segregation of duties) and module B (journal entry testing) are complete. Change management and the cross-module view follow phase by phase.
+> **Status:** module A (access review and segregation of duties), module B (journal entry testing) and module C (change management) are complete. The cross-module view, the workpaper and the dashboard follow phase by phase.
 
 ## Scope and boundaries
 
@@ -20,8 +20,9 @@ Data-driven IT audit tests for banks: access review, segregation of duties, jour
 ```bash
 uv sync
 uv run awb generate data/generated/demo --seed 7   # build the synthetic bank
-uv run awb run data/generated/demo                 # run the access and journal rules
+uv run awb run data/generated/demo                 # run all rules (modules A, B and C)
 uv run awb run data/generated/demo --module b      # journal entries only
+uv run awb run data/generated/demo --module c      # change management only
 uv run awb explain data/generated/demo <finding-id>
 uv run awb benford data/generated/demo --by employee   # digit tables behind B-01/B-02
 uv run awb check-ground-truth data/generated/demo  # compare against the injected issues
@@ -63,11 +64,26 @@ The Benford rules judge a group only above a minimum size, because the MAD of ev
 
 The anomaly ranking (`awb run --rank N`) scores manual entries with an Isolation Forest. It is a sampling aid for choosing entries to inspect and deliberately produces no findings: a score without an explainable threshold cannot be defended in an audit.
 
-### The synthetic bank (both modules)
+## Module C: change management
 
-`awb generate` builds a fictitious bank from a seed: 821 employees in seven org units, 851 accounts on five systems (core banking, payments, general ledger, trading, directory), roles nested up to three levels deep, and one recertification campaign per system. Module B adds a chart of accounts and a fiscal year 2025 with about 60,000 journal entries (about 20 % manual) and 180,000 lines. It then injects known issues and writes them to `ground_truth.json`.
+Six rules on change tickets, approvals, commits and production deployments, specified in [docs/design/module-c-change.md](docs/design/module-c-change.md). They follow DORA Article 9(4)(e), which requires that all changes to ICT systems are "recorded, tested, assessed, approved, implemented and verified in a controlled manner", and Article 17(1) of Commission Delegated Regulation (EU) 2024/1774, which lists what an ICT change management procedure must contain.
 
-The clean bank, without injection, produces no findings in either module. The bank also contains near misses that must not be flagged, for example a leaver whose account is disabled, an account last used 89 days ago, a rare role in a team too small to compare, entries on 24 and 31 December (normal banking days), an amount one cent below the approval limit, and a small group whose Benford MAD looks high purely by chance.
+| Rule | What it finds |
+|---|---|
+| C-01 | Production deployment without an approved change: no ticket, an unknown ticket, a ticket of another system, or a normal change that was never approved |
+| C-02 | The developer of a change deployed it to production, either by hand (also with a second account) or by releasing the pipeline run |
+| C-03 | Emergency change without approval afterwards, or approved more than 7 days after the deployment |
+| C-04 | No approval was in force when the change first reached production |
+| C-05 | The approver requested the change or wrote code for it (RTS Art. 17(1)(b)) |
+| C-06 | Medium or high risk change deployed without a test sign-off, with a late one, or tested by its own developer |
+
+Who built a change comes from the commit authors, not from a field in the ticket. A pipeline deployment runs under a technical account, so the rules look at the person who released it. As in modules A and B, people are compared as employees, not as accounts.
+
+### The synthetic bank (all modules)
+
+`awb generate` builds a fictitious bank from a seed: 821 employees in seven org units, 851 accounts on five systems (core banking, payments, general ledger, trading, directory), roles nested up to three levels deep, and one recertification campaign per system. Module B adds a chart of accounts and a fiscal year 2025 with about 60,000 journal entries (about 20 % manual) and 180,000 lines. Module C adds an audit year of change management (1 October 2025 to 30 September 2026): 1,800 changes (1,170 normal, 540 standard, 90 emergency), about 6,100 commits and 1,855 production deployments, 70 % of them through the pipeline and 14 % failed or rolled back before a redeployment. It then injects known issues and writes them to `ground_truth.json`.
+
+The clean bank, without injection, produces no findings in any module. The bank also contains near misses that must not be flagged, for example a leaver whose account is disabled, an account last used 89 days ago, a rare role in a team too small to compare, entries on 24 and 31 December (normal banking days), an amount one cent below the approval limit, a small group whose Benford MAD looks high purely by chance, a standard change deployed without individual approval, an emergency change approved exactly on day 7, and a developer who deploys their own change to the test environment.
 
 ### Ground-truth result
 
@@ -93,9 +109,16 @@ Output of `awb check-ground-truth` on the default seed. CI runs the same check o
 | B | B-08 | Manual entry above the limit not approved by a second person | 6 | 6 | 6 | 100.0% | 100.0% |
 | B | B-09 | Rare debit/credit account combination | 5 | 5 | 5 | 100.0% | 100.0% |
 | B | B-10 | Manual entry by an unexpected preparer | 4 | 4 | 4 | 100.0% | 100.0% |
+| C | C-01 | Production deployment without an approved change | 6 | 6 | 6 | 100.0% | 100.0% |
+| C | C-02 | Developer deployed their own change | 5 | 5 | 5 | 100.0% | 100.0% |
+| C | C-03 | Emergency change not approved afterwards | 4 | 4 | 4 | 100.0% | 100.0% |
+| C | C-04 | Approval came after the deployment | 4 | 4 | 4 | 100.0% | 100.0% |
+| C | C-05 | Approver is not independent of the change | 4 | 4 | 4 | 100.0% | 100.0% |
+| C | C-06 | Change deployed without test sign-off | 3 | 3 | 3 | 100.0% | 100.0% |
 | A | **Total A** |  | 55 | 55 | 55 | 100.0% | 100.0% |
 | B | **Total B** |  | 42 | 42 | 42 | 100.0% | 100.0% |
-|  | **Total** |  | 97 | 97 | 97 | 100.0% | 100.0% |
+| C | **Total C** |  | 26 | 26 | 26 | 100.0% | 100.0% |
+|  | **Total** |  | 123 | 123 | 123 | 100.0% | 100.0% |
 
 This shows the rules match their specification on data built to that specification. It says nothing about real-world data quality, which is always messier.
 
@@ -133,7 +156,7 @@ The posting right is not in the assigned role itself. It comes from `R-GL-CLERK`
 | Core | Evidence loading and hashing, finding model, rule registry | done |
 | A | Access review and segregation of duties | done |
 | B | Journal entry testing | done |
-| C | Change management | planned |
+| C | Change management | done |
 | D | Cross-module findings, sampling, DORA mapping | planned |
 | E | Audit workpaper (DOCX/PDF), API, dashboard | planned |
 
@@ -149,7 +172,11 @@ uv run ruff check . && uv run ruff format --check .
 
 IT-Prüfungshandlungen für Banken, datenbasiert umgesetzt. Vier Bereiche werden abgedeckt: Berechtigungsprüfung, Funktionstrennung, Journal-Entry-Testing und Change-Management. Getestet wird an einer synthetischen Bank, deren Fehler bekannt sind und absichtlich eingebaut wurden. Dadurch lässt sich jede Prüfregel gegen ein bekanntes Ergebnis prüfen.
 
-Modul A ist fertig, die Berechtigungsprüfung mit acht Regeln. Modul B ebenfalls, das Journal-Entry-Testing mit zehn Regeln, darunter Benford-Analysen, Buchungen am Periodenende, Lücken in Belegnummern, Dubletten und fehlende Vier-Augen-Freigabe. Sie findet unter anderem aktive Konten ausgeschiedener Mitarbeiter, Privilegien ohne Rezertifizierung und Verstöße gegen die Funktionstrennung. Auch Verstöße, die erst über mehrere Ebenen vererbter Rollen entstehen, werden erkannt. Zu jedem Fund zeigt das Werkzeug den Weg vom Konto bis zur einzelnen Berechtigung.
+Modul A ist die Berechtigungsprüfung und arbeitet mit acht Regeln. Es findet aktive Konten ausgeschiedener Mitarbeiter, Privilegien ohne Rezertifizierung und Verstöße gegen die Funktionstrennung. Auch Verstöße, die erst über mehrere Ebenen vererbter Rollen entstehen, erkennt das Modul. Zu jedem Fund zeigt das Werkzeug den Weg vom Konto bis zur einzelnen Berechtigung.
+
+Modul B übernimmt das Journal-Entry-Testing. Hier laufen zehn Regeln, darunter Benford-Analysen, Buchungen am Periodenende, Lücken in den Belegnummern, Dubletten und fehlende Vier-Augen-Freigabe.
+
+Modul C prüft das Change-Management nach DORA Art. 9 Abs. 4 Buchst. e und Art. 17 der Delegierten Verordnung (EU) 2024/1774. Dafür stehen sechs Regeln. Das Modul findet Deployments ohne genehmigten Change und Entwickler, die ihre eigene Änderung in die Produktion bringen. Außerdem erkennt es Notfalländerungen ohne nachträgliche Freigabe, Freigaben nach dem Deployment, Genehmiger, die den Change selbst beantragt oder programmiert haben, und Änderungen ohne Testabnahme. Wer eine Änderung gebaut hat, ergibt sich aus den Commits, nicht aus einem Feld im Ticket.
 
 Alle Daten sind künstlich erzeugt. Echte Daten kommen nicht vor. Die Prüfregeln beruhen nur auf öffentlichen Quellen, nicht auf der Methodik einer Prüfungsgesellschaft.
 
