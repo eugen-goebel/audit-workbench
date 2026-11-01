@@ -247,7 +247,11 @@ from `[seed, 5, doc_no]`, so they differ between seeds.
    and Revision staff who hold only `GL_VIEW`) are already actions without
    entitlement. Measured on seed 7: the clean ledger has 0 such entries, the
    injected one exactly these 4 plus the 3 E00460 entries that item 1 fixes.
-3. **X-03, two cases.** The two developer leavers of A-01 (AD accounts) each
+3. **Clean-ledger consistency.** The ledger leaves out clerks whose personal
+   account is created after 1 January 2025 (an entry date in the last days of
+   December). Otherwise such a clerk posts before the account exists and X-02
+   reports an action without an existing account in the *clean* bank (seed 21).
+4. **X-03, two cases.** The two developer leavers of A-01 (AD accounts) each
    author one commit after their exit date, on changes deployed by someone
    else. Their `last_login` moves after the commit, so A-01 reports
    `logged_in_after_exit = true` and the note changes; the key does not.

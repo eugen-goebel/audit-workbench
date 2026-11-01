@@ -570,6 +570,7 @@ class People:
     job_function: dict[str, str]
     personal: dict[str, str]  # employee -> first personal GL account
     accounts: dict[str, str]  # account -> employee
+    created: dict[str, date] = field(default_factory=dict)  # account -> creation date
 
     @classmethod
     def from_bank(cls, bank: Bank) -> People:
@@ -585,14 +586,16 @@ class People:
             func[emp] = row["job_function"]
         personal: dict[str, str] = {}
         accounts: dict[str, str] = {}
+        created: dict[str, date] = {}
         for row in sorted(bank.rows["accounts"], key=lambda r: r["account_id"]):
             emp = row["employee_id"]
             if row["system"] != "GL" or not emp or emp not in entry:
                 continue
             accounts[row["account_id"]] = emp
+            created[row["account_id"]] = date.fromisoformat(row["created_at"][:10])
             if row["account_type"] == "personal" and emp not in personal:
                 personal[emp] = row["account_id"]
-        return cls(entry, exit_, unit, func, personal, accounts)
+        return cls(entry, exit_, unit, func, personal, accounts, created)
 
     def employed(self, emp: str, day: date) -> bool:
         if emp not in self.entry_date:
@@ -607,6 +610,10 @@ class People:
 
     def eligible(self, emp: str, start: date = YEAR_START, end: date = JOURNAL_AS_OF) -> bool:
         return self.employed(emp, start) and self.employed(emp, end)
+
+    def exists(self, account: str, day: date) -> bool:
+        """The account was created on or before *day*."""
+        return account in self.created and self.created[account] <= day
 
 
 def technical_accounts(bank: Bank) -> list[str]:
@@ -731,12 +738,22 @@ def build_ledger(bank: Bank, rng: np.random.Generator) -> Ledger:
     people = People.from_bank(bank)
     ledger = Ledger(people=people)
 
+    def available(emp: str) -> bool:
+        """Employed for the whole year and the account exists on 1 January.
+
+        A clerk whose personal account is created after the year start (an
+        entry date in the last days of December) would post before the account
+        exists; the cross-module rule X-02 reports exactly that. Such a clerk is
+        left out, so the clean ledger never posts without an existing account.
+        """
+        return people.eligible(emp) and people.exists(people.personal[emp], YEAR_START)
+
     pool = [
         emp
         for emp in sorted(people.personal)
         if people.org_unit[emp] == "Rechnungswesen"
         and people.job_function[emp] == "Sachbearbeitung"
-        and people.eligible(emp)
+        and available(emp)
     ]
     if len(pool) < 24:
         raise RuntimeError(f"only {len(pool)} eligible Rechnungswesen clerks")
@@ -747,7 +764,7 @@ def build_ledger(bank: Bank, rng: np.random.Generator) -> Ledger:
         for emp in sorted(people.personal)
         if people.org_unit[emp] == "Rechnungswesen"
         and people.job_function[emp] == "Analyse"
-        and people.eligible(emp)
+        and available(emp)
         and emp not in clerks
     ]
     occasional = analysts[-5:]
@@ -756,7 +773,7 @@ def build_ledger(bank: Bank, rng: np.random.Generator) -> Ledger:
         for emp in sorted(people.personal)
         if people.org_unit[emp] == "Rechnungswesen"
         and people.job_function[emp] == "Teamleitung"
-        and people.eligible(emp)
+        and available(emp)
     ]
     ledger.approvers = [people.personal[emp] for emp in leads]
     ledger.clerks = clerks

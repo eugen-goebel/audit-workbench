@@ -372,6 +372,13 @@ def test_near_miss_leaver_commits_on_the_exit_date_and_only_before(injected: Syn
     assert not set(near) & {f.entity for f in injected.x}
 
 
+def test_clean_bank_of_seed_21_has_no_findings(tmp_path: Path) -> None:
+    """Seed 21 puts a clerk with a December entry date into the ledger population."""
+    synth = Synth(generate_bank(tmp_path / "clean21", seed=21, inject=False))
+    assert synth.abc == [] and synth.x == []
+    assert synth.truth["issues"] == []
+
+
 @pytest.mark.parametrize("seed", [12, 27])
 def test_exercised_rights_never_start_before_the_joining_date(tmp_path: Path, seed: int) -> None:
     """Seeds 12 and 27 hand the exercised case to someone who joined after 2024-12-01."""
