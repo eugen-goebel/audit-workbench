@@ -48,7 +48,7 @@ Definitions used by every X rule:
 | Action type | Source | Account / employee | Timestamp | Required function |
 |---|---|---|---|---|
 | `je_prepare` | `journal_entries.csv`, `source = manual` | `preparer_account_id` | `entry_ts` | `GL_POST` |
-| `je_approve` | `journal_entries.csv`, `approver_account_id` set | `approver_account_id` | `approved_ts` | `GL_APPROVE` |
+| `je_approve` | `journal_entries.csv`, `approver_account_id` set (any source) | `approver_account_id` | `approved_ts` | `GL_APPROVE` |
 | `prod_deploy` | `deployments.csv`, `environment = prod` | deploying employee (module C, section 2) | `deployed_ts` | none (D1) |
 | `commit` | `commits.csv` | `author_employee_id` | `committed_ts` | none |
 | `change_approval` | `change_approvals.csv` | `approver_employee_id` | `decided_ts` | none |
@@ -60,7 +60,7 @@ a person.
 ## 2. Input files
 
 No new files. The X rules read the files of modules A, B and C through their
-existing loaders and evidence hashes. Every X finding lists the hashes of all
+existing loaders and evidence hashes, all from the same directory. Every X finding lists the hashes of all
 files it read.
 
 ## 3. Rules
@@ -86,9 +86,11 @@ rules' own output, not from the ground truth.
   up. One finding per employee and conflict.
 - **Severity:** from the ruleset (`SOD-GL-01`: HIGH), raised to CRITICAL if
   at least one entry is at or above the manual approval limit.
-- **Details:** `doc_nos` (sorted), `count`, `first_ts`, `last_ts`,
+- **Details:** `doc_nos` (sorted), `count`, `first_ts`, `last_ts` (earliest
+  and latest `entry_ts`),
   `max_amount`, `via_second_account` (bool), `held_on_as_of` (bool, i.e.
-  A-05 also reports it), `related`.
+  A-05 also reports it), `related` (A-05 with the same entity, B-08 on the
+  listed entries).
 - Unlike B-08, X-01 also covers entries **below** the approval limit: an
   employee who can post and approve may self-approve small amounts, and the
   four-eyes rule does not catch it.
@@ -102,6 +104,10 @@ rules' own output, not from the ground truth.
 - **Entity:** `doc_no`. One finding per entry; `details.actions` lists `je_prepare`,
   `je_approve` or both.
 - **Severity:** HIGH.
+- **Details:** `actions`, `checks` (per action: account, function, `ts`,
+  reason `account_unknown`, `account_not_created` or `function_not_held`),
+  `related` (B findings on the same `doc_no`, A findings on the acting
+  account).
 - **Why it matters:** either the application does not enforce its
   authorisation model, or the access extract the audit relies on is
   incomplete. Both undermine every A result. The finding says so and does not
@@ -109,7 +115,10 @@ rules' own output, not from the ground truth.
 
 ### X-03 `activity_after_exit`: a leaver acted after the exit date
 
-- **Population:** all actions of the action table with an employee.
+- **Population:** all actions of the action table with an employee, over
+  the whole file, not only the audit period. Action ids: `doc_no`,
+  `deployment_id`, `commit_sha`, `change_id`,
+  `campaign_id:account_id:role_id`.
 - **Exception:** the employee has an `exit_date` in HR and the action day is
   **after** it. An action on the exit date itself is not flagged.
 - **Entity:** `employee_id`. One finding per employee.
