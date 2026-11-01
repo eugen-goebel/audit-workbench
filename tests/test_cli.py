@@ -13,7 +13,7 @@ from audit_workbench.cli import app
 from audit_workbench.core.evidence import sha256_file
 
 runner = CliRunner()
-TOTAL_ISSUES = 55  # sum of the injected counts in spec section 5
+TOTAL_ISSUES = 97  # 55 access issues (module A) + 42 journal issues (module B)
 
 
 @pytest.fixture(scope="module")
@@ -82,7 +82,7 @@ def test_run_table_lists_every_finding_with_summary_and_hashes(bank: Path) -> No
     out = result.stdout
     assert "2026-09-30" in out.splitlines()[0]  # audit date is stated up front
     header = next(line for line in out.splitlines() if line.startswith("finding_id"))
-    for column in ("rule", "severity", "entity", "description"):
+    for column in ("module", "rule", "severity", "entity", "description"):
         assert column in header
     findings = _run_json(bank)
     assert len(findings) == TOTAL_ISSUES
@@ -98,7 +98,7 @@ def test_run_table_lists_every_finding_with_summary_and_hashes(bank: Path) -> No
 
 def test_run_table_is_sorted_by_severity_then_rule_then_entity(bank: Path) -> None:
     findings = _run_json(bank)
-    keys = [(-f["severity"], f["rule_id"], f["entity"]) for f in findings]
+    keys = [(f["rule_id"][0], -f["severity"], f["rule_id"], f["entity"]) for f in findings]
     assert keys == sorted(keys)
     result = runner.invoke(app, ["run", str(bank)])
     positions = [result.stdout.index(f["finding_id"]) for f in findings]
@@ -117,7 +117,7 @@ def test_run_markdown_is_a_github_table(bank: Path) -> None:
     result = runner.invoke(app, ["run", str(bank), "--format", "markdown"])
     assert result.exit_code == 0, result.output
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert lines[0].startswith("| finding_id | rule | severity | entity | description |")
+    assert lines[0].startswith("| finding_id | module | rule | severity | entity | description |")
     assert set(lines[1]) <= set("|- ")
     assert all(line.startswith("|") and line.endswith("|") for line in lines)
     assert len(lines) == TOTAL_ISSUES + 2
@@ -156,9 +156,9 @@ def test_run_without_as_of_and_ground_truth_exits_2(bank_copy: Path) -> None:
 
 
 def test_run_explicit_as_of_works_without_ground_truth(bank_copy: Path) -> None:
-    expected = _run_json(bank_copy)
+    expected = _run_json(bank_copy, "--module", "a")
     (bank_copy / "ground_truth.json").unlink()
-    assert _run_json(bank_copy, "--as-of", "2026-09-30") == expected
+    assert _run_json(bank_copy, "--module", "a", "--as-of", "2026-09-30") == expected
 
 
 def test_run_as_of_changes_the_result(bank: Path) -> None:
@@ -263,10 +263,14 @@ def test_check_ground_truth_passes_on_generated_bank(bank: Path) -> None:
     out = result.stdout
     assert out.startswith("## ")
     assert "seed" in out.lower() and "2026-09-30" in out
-    assert "| rule | title | expected | found | true positives | recall | precision |" in out
-    assert "| A-05 | Segregation-of-duties conflict | 9 | 9 | 9 | 100.0% | 100.0% |" in out
     assert (
-        f"| **Total** |  | {TOTAL_ISSUES} | {TOTAL_ISSUES} | {TOTAL_ISSUES} | 100.0% | 100.0% |"
+        "| module | rule | title | expected | found | true positives | recall | precision |" in out
+    )
+    assert "| A | A-05 | Segregation-of-duties conflict | 9 | 9 | 9 | 100.0% | 100.0% |" in out
+    assert "| A | **Total A** |  | 55 | 55 | 55 | 100.0% | 100.0% |" in out
+    assert "| B | **Total B** |  | 42 | 42 | 42 | 100.0% | 100.0% |" in out
+    assert (
+        f"|  | **Total** |  | {TOTAL_ISSUES} | {TOTAL_ISSUES} | {TOTAL_ISSUES} | 100.0% | 100.0% |"
         in out
     )
     assert "Missed" not in out and "Unexpected" not in out
@@ -281,8 +285,9 @@ def test_check_ground_truth_fails_when_a_finding_is_not_in_ground_truth(bank_cop
     assert "Unexpected" in result.stdout
     assert f"`{removed['rule_id']}` `{removed['entity']}`" in result.stdout
     assert "Missed" not in result.stdout
-    assert f"| {TOTAL_ISSUES - 1} | {TOTAL_ISSUES} | {TOTAL_ISSUES - 1} | 100.0% | 98.2% |" in (
-        result.stdout
+    assert (
+        f"|  | **Total** |  | {TOTAL_ISSUES - 1} | {TOTAL_ISSUES} | {TOTAL_ISSUES - 1} | 100.0% | 99.0% |"
+        in (result.stdout)
     )
 
 
@@ -294,7 +299,7 @@ def test_check_ground_truth_fails_when_an_expected_issue_is_not_found(bank_copy:
     assert result.exit_code == 1
     assert "Missed" in result.stdout
     assert "`A-03` `GHOST-1`" in result.stdout
-    assert "| A-03 | " in result.stdout and "| 4 | 3 | 3 | 75.0% | 100.0% |" in result.stdout
+    assert "| A | A-03 | " in result.stdout and "| 4 | 3 | 3 | 75.0% | 100.0% |" in result.stdout
 
 
 def test_check_ground_truth_on_clean_bank_shows_na(tmp_path: Path) -> None:
@@ -302,7 +307,7 @@ def test_check_ground_truth_on_clean_bank_shows_na(tmp_path: Path) -> None:
     assert runner.invoke(app, ["generate", str(out), "--clean"]).exit_code == 0
     result = runner.invoke(app, ["check-ground-truth", str(out)])
     assert result.exit_code == 0, result.output
-    assert "| A-01 | " in result.stdout
+    assert "| A | A-01 | " in result.stdout
     assert "| 0 | 0 | 0 | n/a | n/a |" in result.stdout
 
 
@@ -311,3 +316,67 @@ def test_check_ground_truth_requires_ground_truth_file(bank_copy: Path) -> None:
     result = runner.invoke(app, ["check-ground-truth", str(bank_copy)])
     assert result.exit_code == 2
     assert "ground_truth.json" in result.output
+
+
+# --- module B and new options ------------------------------------------------
+
+
+def test_run_module_b_only(bank: Path) -> None:
+    findings = _run_json(bank, "--module", "b")
+    assert len(findings) == 42
+    assert all(f["rule_id"].startswith("B-") for f in findings)
+
+
+def test_run_module_a_only(bank: Path) -> None:
+    findings = _run_json(bank, "--module", "a")
+    assert len(findings) == 55
+    assert all(f["rule_id"].startswith("A-") for f in findings)
+
+
+def test_run_rank_appends_selection_aid(bank: Path) -> None:
+    result = runner.invoke(app, ["run", str(bank), "--rank", "5"])
+    assert result.exit_code == 0, result.output
+    out = result.stdout
+    assert "Anomaly ranking" in out and "selection aid" in out
+    ranking = out.split("Anomaly ranking", 1)[1]
+    assert "rank" in ranking and "score" in ranking and "doc_no" in ranking
+    assert "MJ-" in ranking
+
+
+def test_run_rank_rejected_with_json(bank: Path) -> None:
+    result = runner.invoke(app, ["run", str(bank), "--rank", "5", "--format", "json"])
+    assert result.exit_code == 2
+    assert "--rank" in result.output
+
+
+def test_benford_by_employee_marks_small_groups(bank: Path) -> None:
+    result = runner.invoke(app, ["benford", str(bank), "--by", "employee"])
+    assert result.exit_code == 0, result.output
+    out = result.stdout
+    assert "MAD" in out and "chi-square" in out
+    assert "too small to judge" in out
+    assert "digit" in out and "expected" in out and "observed" in out
+
+
+def test_benford_rejects_unknown_grouping(bank: Path) -> None:
+    result = runner.invoke(app, ["benford", str(bank), "--by", "month"])
+    assert result.exit_code == 2
+
+
+def test_explain_b10_shows_entry_and_lines(bank: Path) -> None:
+    finding = _first(_run_json(bank), "B-10")
+    result = runner.invoke(app, ["explain", str(bank), finding["finding_id"]])
+    assert result.exit_code == 0, result.output
+    out = result.stdout
+    assert finding["entity"] in out
+    assert "Lines:" in out
+    assert "preparer:" in out and "approver:" in out
+
+
+def test_explain_b01_shows_digit_table(bank: Path) -> None:
+    finding = _first(_run_json(bank), "B-01")
+    result = runner.invoke(app, ["explain", str(bank), finding["finding_id"]])
+    assert result.exit_code == 0, result.output
+    out = result.stdout
+    assert "digit" in out and "expected" in out and "observed" in out
+    assert "MAD" in out and "assessment:" in out
