@@ -217,10 +217,14 @@ and whether it stays at or below `tolerable_rate` (ISA 530 para. 15).
 ## 6. Generator changes and ground truth
 
 The X data comes from the existing generator plus a few targeted changes. A
-new random generator `default_rng([seed, 4])` is used, so no A, B or C value
+new random generator `default_rng([seed, 5])` is used, so no A, B or C value
 shifts beyond the rows named here. The A, B and C ground-truth **keys** stay
 identical (proof: clone `main`, generate seeds 7 and 11 on both, compare the
-key sets; byte diffs are listed in the PR).
+key sets; byte diffs are listed in the PR). The stream is `[seed, 5]` and not
+`[seed, 4]` because module C owns `[seed, 4]`: with the same seed two
+generators would draw the same numbers and the X choices would mirror the C
+choices. The approval timestamps of the two small self-approved entries come
+from `[seed, 5, doc_no]`, so they differ between seeds.
 
 1. **X-01, two cases.**
    - The cross-account GL employee of A-05 (E00460 on seed 7) gets both
@@ -231,7 +235,14 @@ key sets; byte diffs are listed in the PR).
      the employee held only `GL_VIEW` in 2025. Both are corrected.
    - One same-account `SOD-GL-01` employee of A-05, employed before
      2025-01-01, gets the two assignments from 2024-12-01 and self-approves two
-     entries **below** the approval limit (X-01 only, no B-08).
+     entries **below** the approval limit (X-01 only, no B-08). The employee is
+     the first one in injection order whose `entry_date` is before 2025-01-01
+     and who has no exit date.
+   - **Both cases** use `max(2024-12-01, entry_date)` as the start of the
+     exercised rights and of the second account, never a date before the
+     employee joined. A B-08 employee who entered between 2024-12-01 and
+     2025-01-01 (seed 27, for example) would otherwise hold rights before their
+     first working day. The date lands in the ground-truth note.
 2. **X-02, four cases, no new injection.** The four B-10 entries (Administration
    and Revision staff who hold only `GL_VIEW`) are already actions without
    entitlement. Measured on seed 7: the clean ledger has 0 such entries, the
@@ -244,7 +255,7 @@ key sets; byte diffs are listed in the PR).
 
 Near misses (must not be flagged):
 
-- the four GL SoD conflicts of A-05 that start on 2026-07-01, after the
+- the three GL SoD conflicts of A-05 that still start on 2026-07-01, after the
   ledger year (risk, not exercised: X-01)
 - the SoD employee of item 1 approving another clerk's entry (X-01)
 - an entry prepared on the first day of the preparer's role assignment (X-02)

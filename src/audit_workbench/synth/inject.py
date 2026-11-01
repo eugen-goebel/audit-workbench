@@ -6,7 +6,7 @@ A-01 to A-08 fires exactly the number of times given in spec section 5:
 ======  ====  ----------------------------------------------------------------
 Rule    N     Notes
 ======  ====  ----------------------------------------------------------------
-A-01    12    4 of them logged in after the exit date
+A-01    12    4 logged in after the exit date, +2 developers via X-03 (see change.py)
 A-02    10    6 stale last_login, 4 never logged in with old created_at
 A-03    3     generic accounts switched to interactive login
 A-04    6     2 privileged only via inheritance (R-*-SUPERVISOR)
@@ -31,6 +31,9 @@ from audit_workbench.synth.bank import Bank, _ts
 
 VALID_FROM_INJECTED = "2026-07-01"
 CREATED_INJECTED = "2026-07-01T08:00:00"
+#: assignments (and the second account) of the two GL SoD employees that the X-01
+#: cases use start before the ledger year, so the rights are held when they act
+VALID_FROM_EXERCISED = "2024-12-01"
 
 EXPECTED_COUNTS = {
     "A-01": 12,
@@ -257,6 +260,7 @@ def _inject_sod(bank: Bank) -> list[dict[str, str]]:
             }
         )
 
+    gl_same_account: list[tuple[str, str]] = []
     # Same account: create + approve on one account each.
     same_account = [
         (
@@ -312,6 +316,8 @@ def _inject_sod(bank: Bank) -> list[dict[str, str]]:
         if b_priv:
             bank.auto_decision(account_id, role_b)
         sod(emp_id, cid, fn_a, account_id, fn_b, account_id)
+        if cid == "SOD-GL-01":
+            gl_same_account.append((emp_id, account_id))
 
     # Across two accounts of the same employee.
     for unit, func, role_a, role_b in [
@@ -325,15 +331,23 @@ def _inject_sod(bank: Bank) -> list[dict[str, str]]:
         else:
             (emp_id,) = _pick(bank, unit, func, 1)
         system = bank.emp_meta[emp_id]["system"]
+        # The GL employee is the X-01 case with a second account: rights from
+        # before the ledger year, so the second account can approve in 2025.
+        # Never before the joining date: on some seeds the B-08 employee entered
+        # between 2024-12-01 and 2025-01-01.
+        exercised = unit == "Rechnungswesen"
+        valid_from = _exercised_from(bank, emp_id) if exercised else VALID_FROM_INJECTED
         account_a = _account_of(bank, emp_id)
-        bank.assign(account_a, role_a, valid_from=VALID_FROM_INJECTED)
+        bank.assign(account_a, role_a, valid_from=valid_from)
         account_b = bank.add_account(
             system,
             employee_id=emp_id,
-            created_at=CREATED_INJECTED,
+            created_at=f"{valid_from}T08:00:00" if exercised else CREATED_INJECTED,
             last_login=bank.personal_login(),
         )
-        bank.assign(account_b, role_b, valid_from=VALID_FROM_INJECTED)
+        if exercised:
+            bank.crosslink["cross_exercised_from"] = valid_from
+        bank.assign(account_b, role_b, valid_from=valid_from)
         privileged = ROLES_PRIV[role_b]
         if privileged:
             bank.auto_decision(account_b, role_b)
@@ -350,7 +364,38 @@ def _inject_sod(bank: Bank) -> list[dict[str, str]]:
         bank.assign(account_id, "R-GL-APPROVER", valid_from=VALID_FROM_INJECTED)
         bank.auto_decision(account_id, "R-GL-APPROVER")
         sod(emp_id, "SOD-GL-01", "GL_POST", account_id, "GL_APPROVE", account_id)
+        gl_same_account.append((emp_id, account_id))
+
+    _choose_exercised_gl_employee(bank, gl_same_account)
     return issues
+
+
+def _choose_exercised_gl_employee(bank: Bank, candidates: list[tuple[str, str]]) -> None:
+    """X-01, same-account case: one SOD-GL-01 employee holds both rights since 2024-12-01.
+
+    Takes the first same-account GL conflict (injection order) whose employee joined
+    before 2025-01-01 and has no exit date, and moves the injected assignments of that
+    account from 2026-07-01 to 2024-12-01. The employee and account are handed to the
+    journal injection in ``bank.crosslink``.
+    """
+    entry = {r["employee_id"]: r["entry_date"] for r in bank.rows["hr_employees"]}
+    for emp_id, account_id in candidates:
+        if entry[emp_id] >= "2025-01-01" or bank.emp_meta[emp_id]["exit_date"] is not None:
+            continue
+        valid_from = _exercised_from(bank, emp_id)
+        for row in bank.rows["account_roles"]:
+            if row["account_id"] == account_id and row["valid_from"] == VALID_FROM_INJECTED:
+                row["valid_from"] = valid_from
+        bank.crosslink["same_account_gl"] = (emp_id, account_id)
+        bank.crosslink["same_account_from"] = valid_from
+        return
+    raise RuntimeError("no same-account GL SoD employee joined before 2025-01-01")
+
+
+def _exercised_from(bank: Bank, emp_id: str) -> str:
+    """Start of the exercised rights: 2024-12-01, or the joining date if later."""
+    entry = next(r["entry_date"] for r in bank.rows["hr_employees"] if r["employee_id"] == emp_id)
+    return max(VALID_FROM_EXERCISED, entry)
 
 
 ROLES_PRIV = {
@@ -596,8 +641,17 @@ def _issue(rule_id: str, note: str, entry: object | None = None) -> dict[str, ob
     return {"rule_id": rule_id, "entity": "", "note": note, "entry": entry}
 
 
-def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[str, object]]:
+def inject_journal(
+    bank: Bank,
+    ledger,  # noqa: ANN001
+    rng: np.random.Generator,
+    xrng: np.random.Generator | None = None,
+) -> list[dict[str, object]]:
     """Inject the journal issues of spec section 4 and return the ground truth.
+
+    With *xrng* (``default_rng([seed, 5])``) the cross-module cases of phase 4
+    (X-01, X-02 and their near misses, see `inject_crosslink_journal`) are added
+    afterwards; no value drawn from *rng* depends on them.
 
     The entities of all issues except B-01/B-02/B-03 are document numbers that
     only exist after ``finalize_ledger``; they carry the entry in a private
@@ -714,6 +768,11 @@ def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[st
 
     # -- B-05: five post-closing entries (one combined with B-08) --------
     cross = cross_account_employee(bank, people)
+    # The self-approvals of this employee use the second GL account (X-01).
+    cross_first = people.personal[cross]
+    cross_second = next(
+        a for a in sorted(people.accounts) if people.accounts[a] == cross and a != cross_first
+    )
     post_pool = [
         e
         for e in _free(ledger)
@@ -727,8 +786,9 @@ def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[st
         if idx == 0:
             if entry.total < MANUAL_LIMIT:
                 entry.segments[0].amount += MANUAL_LIMIT - entry.total + 1
-            entry.preparer = people.personal[cross]
+            entry.preparer = cross_first
             entry.approval = "self"
+            entry.approver_account = cross_second
         issues.append(
             _issue(
                 "B-05",
@@ -810,21 +870,23 @@ def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[st
         )
     for _idx in range(2):
         entry = _take(rng, [e for e in _free(ledger, minimum=MANUAL_LIMIT)], 1)[0]
-        entry.preparer = people.personal[cross]
+        entry.preparer = cross_first
         entry.approval = "self"
+        entry.approver_account = cross_second
         entry.frozen = True
         issues.append(
             _issue(
                 "B-08",
-                f"Entry prepared and approved by {cross} through a second GL account of "
-                f"the same employee",
+                f"Entry prepared by {cross} with {cross_first} and approved by the same "
+                f"employee with the second GL account {cross_second}",
                 entry,
             )
         )
     issues.append(
         _issue(
             "B-08",
-            f"Post-closing entry prepared and approved by {cross} "
+            f"Post-closing entry prepared by {cross} with {cross_first} and approved by the "
+            f"same employee with the second GL account {cross_second} "
             f"(the same entry as the first B-05 finding)",
             posts[0],
         )
@@ -875,7 +937,126 @@ def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[st
         )
 
     assert near_miss_clerk
+    if xrng is not None:
+        issues += inject_crosslink_journal(
+            bank, ledger, people, xrng, cross_second, [i for i in issues if i["rule_id"] == "B-10"]
+        )
     return issues
+
+
+def inject_crosslink_journal(
+    bank: Bank,
+    ledger,  # noqa: ANN001
+    people,  # noqa: ANN001
+    xrng: np.random.Generator,
+    cross_second: str,
+    b10_issues: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """The journal side of the cross-module ground truth (phase 4 spec, section 6).
+
+    * X-01 (a): the cross-account GL employee. Their self-approvals (B-08) are
+      approved with the second account, which holds GL_APPROVE since 2024-12-01.
+      Nothing to add here, the entries exist already; the issue is recorded.
+    * X-01 (b): the same-account SOD-GL-01 employee prepares and self-approves two
+      manual entries below the approval limit (no B rule fires on them).
+    * X-02: the four B-10 entries are actions without entitlement; the entity is
+      the same document number.
+    * Near misses: the SoD employees approve another clerk's entry; one clerk's
+      first entry falls on the first day of their GL_POST assignment.
+
+    The clean ledger approves only entries at or above the limit. The two small
+    self-approvals of X-01 draw their approval time from their own stream (see
+    ``assign_approvals``) and the other entries taken here are above the limit, so
+    the approval timestamps of all other entries stay as they were.
+    """
+    from audit_workbench.synth.ledger import MANUAL_LIMIT  # noqa: PLC0415
+
+    out: list[dict[str, object]] = []
+    cross = people.employee_of(cross_second)
+    same_emp, same_account = bank.crosslink["same_account_gl"]
+    if same_account != people.personal[same_emp]:
+        raise RuntimeError("same-account SOD-GL-01 employee has no first personal GL account")
+
+    # X-01 (a) -----------------------------------------------------------
+    out.append(
+        {
+            "rule_id": "X-01",
+            "entity": f"{cross}:SOD-GL-01",
+            "note": (
+                f"Employee {cross} prepared three manual entries with {people.personal[cross]} "
+                f"and approved them with the second GL account {cross_second} "
+                f"(GL_POST and GL_APPROVE both held since {bank.crosslink['cross_exercised_from']})"
+            ),
+            "entry": None,
+        }
+    )
+
+    # X-01 (b): two small self-approved entries --------------------------
+    # the account exists (created three days after the entry date) on the entry day
+    created = next(
+        r["created_at"][:10] for r in bank.rows["accounts"] if r["account_id"] == same_account
+    )
+    small = [
+        e
+        for e in _free(ledger)
+        if e.total < MANUAL_LIMIT // 2 and e.entry_day.isoformat() > created
+    ]
+    for entry in _take(xrng, small, 2):
+        entry.preparer = same_account
+        entry.approval = "self"
+        entry.frozen = True
+    out.append(
+        {
+            "rule_id": "X-01",
+            "entity": f"{same_emp}:SOD-GL-01",
+            "note": (
+                f"Employee {same_emp} prepared and approved two manual entries below the "
+                f"approval limit with the same account {same_account} "
+                f"(GL_POST and GL_APPROVE both held since {bank.crosslink['same_account_from']})"
+            ),
+            "entry": None,
+        }
+    )
+
+    # X-02: the four B-10 entries ----------------------------------------
+    for issue in b10_issues:
+        entry = issue["entry"]
+        account = entry.preparer  # type: ignore[attr-defined]
+        employee = people.employee_of(account)
+        out.append(
+            _issue(
+                "X-02",
+                f"Entry prepared by {employee} ({people.org_unit[employee]}/"
+                f"{people.job_function[employee]}) with {account}, which never held GL_POST",
+                entry,
+            )
+        )
+
+    # Near miss: the SoD employees approve another clerk's entry ---------
+    big = [e for e in _free(ledger, minimum=MANUAL_LIMIT)]
+    for entry, account in zip(_take(xrng, big, 2), (cross_second, same_account), strict=True):
+        entry.approver_account = account
+        entry.frozen = True
+
+    # Near miss: an entry on the first day of the preparer's GL_POST assignment
+    used_clerks = {1, 4, 6, 9, 10, 11, 12}
+    spare = [i for i in range(len(ledger.clerks)) if i not in used_clerks]
+    clerk = ledger.clerks[spare[int(xrng.integers(0, len(spare)))]]
+    clerk_account = people.personal[clerk]
+    first = min(
+        (e for e in ledger.entries if e.kind == "manual" and e.preparer == clerk_account),
+        key=lambda e: (e.entry_day, e.entry_time),
+    )
+    first.frozen = True
+    rows = [
+        r
+        for r in bank.rows["account_roles"]
+        if r["account_id"] == clerk_account and r["role_id"] == "R-GL-CLERK"
+    ]
+    if len(rows) != 1:
+        raise RuntimeError(f"{clerk_account} has {len(rows)} R-GL-CLERK assignments")
+    rows[0]["valid_from"] = first.entry_day.isoformat()
+    return out
 
 
 def _manual_entry(

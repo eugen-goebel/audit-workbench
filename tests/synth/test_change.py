@@ -520,6 +520,15 @@ def test_production_deployers_and_the_pipeline_account(bank: Bank) -> None:
         assert data.accounts.at[row.account_id, "account_type"] == "personal"
 
 
+def _planted_leavers(bank: Bank) -> set[str]:
+    """Leavers that author a commit on purpose (phase 4, X-03 and its two near misses)."""
+    data = bank.data
+    authors = set(data.commits["author_employee_id"])
+    leavers = {e for e in authors if data.employees.at[e, "exit_date"] != ""}
+    assert len(leavers) == (4 if bank.inject else 0)
+    return leavers
+
+
 def test_only_employees_active_over_the_whole_period_take_part(bank: Bank) -> None:
     data = bank.data
     people: set[str] = set(data.changes["requester_employee_id"]) | set(
@@ -529,6 +538,7 @@ def test_only_employees_active_over_the_whole_period_take_part(bank: Bank) -> No
     people |= {a.approver_employee_id for items in data.approvals.values() for a in items}
     people |= set(data.deployments["deploying_employee_id"].dropna())
     people.discard("")
+    people -= _planted_leavers(bank)
     hr = data.employees.loc[sorted(people)]
     assert (hr["exit_date"] == "").all()
     assert (hr["entry_date"] < PERIOD_START.isoformat()).all()
@@ -546,6 +556,7 @@ def test_nobody_in_change_data_is_part_of_an_a_or_b_ground_truth_entry(bank: Ban
     people |= {a.approver_employee_id for items in data.approvals.values() for a in items}
     people |= set(data.deployments["deploying_employee_id"].dropna())
     people.discard("")
+    people -= _planted_leavers(bank)
     subjects.discard("")
     assert not (people & subjects)
     assert "AD-" not in "".join(sorted(set(data.deployments["account_id"]) & subjects))
@@ -638,35 +649,76 @@ def test_identical_across_processes_with_different_hash_seeds(tmp_path: Path) ->
     assert digests[0] == digests[1]
 
 
-#: hashes of the module B files and ground-truth entries as generated on main,
-#: before module C existed
+#: hashes of the module B files and ground-truth keys as generated on main, before
+#: module C and the cross-module cases (phase 4) existed
 MODULE_B_BASELINE = {
     7: {
         "gl_accounts.csv": "a5b49277edaa38be8ea2260ebeba03802c03405a8c1fc0fbe0c95a330bc09b5b",
-        "journal_entries.csv": "aab3a29c2e715f84481c1dbde390b7eb72836f9fd9088e0ef4b67914452daed6",
         "journal_lines.csv": "c886be29a89a7e17d8179f24bf25f378d5c34dd537f80737f8dfb893f70de1cd",
         "close_calendar.csv": "fb3b2b802e12c6652ac66033eafc59a7c8b2362d0e143366f6cb7b617cf3f417",
         "approval_limits.csv": "c19ee8502a5f55870f65e7adc32fe60e0b1434acb8485fcb3500a1d29ffb1905",
-        "b_issues": "84209c6b9bd1a3de6c1610661a5e558c818ae55cae0732b0cec6ff62936fc52e",
+        "entries_without_accounts": (
+            "d6d0d9db095f38989dac3db5a63452eea4b336dcd04238d3658515fcbb70c715"
+        ),
+        "approval_times": "98e570796d769742f28369d5811363fd2b053f07c88c20a7163987d3db1346ff",
+        "b_keys": "3e99b3fcd040acde769e147907c6080aa3739f94def0a3339996a0562a724c24",
     },
     11: {
         "gl_accounts.csv": "a5b49277edaa38be8ea2260ebeba03802c03405a8c1fc0fbe0c95a330bc09b5b",
-        "journal_entries.csv": "eb6cdcc58cdf666fb60cdf70b3219a3d216e6e722276afd6484c12bfd337a840",
         "journal_lines.csv": "5707cbb49502c17964d4540ac14b8dbcd9f307d0bb778f84fcae5f73a6e431f8",
         "close_calendar.csv": "fb3b2b802e12c6652ac66033eafc59a7c8b2362d0e143366f6cb7b617cf3f417",
         "approval_limits.csv": "c19ee8502a5f55870f65e7adc32fe60e0b1434acb8485fcb3500a1d29ffb1905",
-        "b_issues": "c8f1764092b4cc6b8d3077675ba713ba8021eb2d8f17c215d5b7187274ce14be",
+        "entries_without_accounts": (
+            "364d04e715b75fdda3050979a29b191a22f9f2e20c5727d609469ea07c8feb1a"
+        ),
+        "approval_times": "5f3bd73433b2ec5abcc14fe6ec27c3f0b0587c437f87904e437427b61fc4b200",
+        "b_keys": "f80ae1cb1711497220adc46d607c8abf0cb9668847863e27aa89abfd99ae0477",
     },
 }
 
 
+def _sha(obj: object) -> str:
+    return hashlib.sha256(json.dumps(obj).encode()).hexdigest()
+
+
 def test_module_b_is_byte_identical_to_main(injected: Bank) -> None:
+    """Module B equals main except for what phase 4 (spec section 6) changes on purpose.
+
+    The files other than ``journal_entries.csv`` are byte-identical. In the entries only
+    the preparer and approver accounts of seven rows differ (the three self-approvals of the
+    cross-account employee now use the second account, two entries of the same-account SoD
+    employee, two entries approved by the SoD employees); two of these seven get an
+    approval time that main did not have. All other approval times are unchanged.
+    """
     expected = MODULE_B_BASELINE[injected.seed]
-    for name, digest in expected.items():
-        if name == "b_issues":
-            continue
+    for name in (
+        "gl_accounts.csv",
+        "journal_lines.csv",
+        "close_calendar.csv",
+        "approval_limits.csv",
+    ):
         got = hashlib.sha256((injected.dir / name).read_bytes()).hexdigest()
-        assert got == digest, name
-    b_issues = [i for i in injected.truth["issues"] if i["rule_id"].startswith("B-")]
-    got = hashlib.sha256(json.dumps(b_issues, sort_keys=True).encode()).hexdigest()
-    assert got == expected["b_issues"]
+        assert got == expected[name], name
+
+    with (injected.dir / "journal_entries.csv").open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.reader(fh))
+    head = rows[0]
+    dropped = {head.index(c) for c in ("preparer_account_id", "approver_account_id", "approved_ts")}
+    kept = [[c for i, c in enumerate(r) if i not in dropped] for r in rows]
+    assert _sha(kept) == expected["entries_without_accounts"]
+
+    b08 = {i["entity"] for i in injected.truth["issues"] if i["rule_id"] == "B-08"}
+    doc, prep, appr, ts = (
+        head.index(c)
+        for c in ("doc_no", "preparer_account_id", "approver_account_id", "approved_ts")
+    )
+    # the two small self-approvals of X-01 did not exist on main
+    small = {r[doc] for r in rows[1:] if r[appr] and r[appr] == r[prep] and r[doc] not in b08}
+    assert len(small) == 2
+    times = [[r[doc], r[ts]] for r in rows[1:] if r[ts] and r[doc] not in small]
+    assert _sha(times) == expected["approval_times"]
+
+    b_keys = sorted(
+        [i["rule_id"], i["entity"]] for i in injected.truth["issues"] if i["rule_id"][:2] == "B-"
+    )
+    assert _sha(b_keys) == expected["b_keys"]

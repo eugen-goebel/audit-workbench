@@ -456,6 +456,9 @@ class Entry:
     protected: bool = False
     reversal_of: str = ""
     approver: str = ""
+    #: account that must approve the entry (a second account of the preparer for
+    #: ``approval == "self"``, or the approver of a near miss of the X rules)
+    approver_account: str = ""
     approved_ts: str = ""
     doc_no: str = ""
     number_range: str = ""
@@ -1241,7 +1244,7 @@ def _pick_approver(ledger: Ledger, entry: Entry, day: date, start: float) -> str
     return ""
 
 
-def assign_approvals(ledger: Ledger, rng: np.random.Generator) -> None:
+def assign_approvals(ledger: Ledger, rng: np.random.Generator, *, seed: int) -> None:
     """Four-eyes principle for all manual entries at or above the limit."""
     for entry in ledger.entries:
         entry.approver = ""
@@ -1255,10 +1258,21 @@ def assign_approvals(ledger: Ledger, rng: np.random.Generator) -> None:
             needed = True
         if not needed:
             continue
-        approved = _approval_moment(entry, rng)
+        if entry.approval == "self" and entry.total < MANUAL_LIMIT:
+            # An approval the clean ledger does not have (X-01): its own stream, so
+            # the timestamps drawn for every other entry stay as they were. The
+            # stream carries the seed and the document number, so two seeds never
+            # share a timestamp for the same document number.
+            counter = int(entry.doc_no.rsplit("-", 1)[1])
+            approved = _approval_moment(entry, np.random.default_rng([seed, 5, counter]))
+        else:
+            approved = _approval_moment(entry, rng)
         entry.approved_ts = approved.strftime("%Y-%m-%dT%H:%M:%S")
         if entry.approval == "self":
-            entry.approver = entry.preparer
+            entry.approver = entry.approver_account or entry.preparer
+            continue
+        if entry.approver_account:
+            entry.approver = entry.approver_account
             continue
         approver = _pick_approver(ledger, entry, approved.date(), entry.rnd_pick)
         if approver:
@@ -1267,10 +1281,10 @@ def assign_approvals(ledger: Ledger, rng: np.random.Generator) -> None:
             raise RuntimeError(f"no approver available for {entry.ts} {entry.total}")
 
 
-def finalize_ledger(ledger: Ledger, rng: np.random.Generator) -> None:
+def finalize_ledger(ledger: Ledger, rng: np.random.Generator, *, seed: int) -> None:
     resolve_duplicates(ledger)
     number_entries(ledger)
-    assign_approvals(ledger, rng)
+    assign_approvals(ledger, rng, seed=seed)
 
 
 # ---------------------------------------------------------------------------
