@@ -1,6 +1,7 @@
 # Audit Workbench
 
 [![CI](https://github.com/eugen-goebel/audit-workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/eugen-goebel/audit-workbench/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/eugen-goebel/audit-workbench/actions/workflows/codeql.yml/badge.svg)](https://github.com/eugen-goebel/audit-workbench/actions/workflows/codeql.yml)
 ![Python](https://img.shields.io/badge/Python-3.12+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
