@@ -53,6 +53,27 @@ def _pick(bank: Bank, unit: str, func: str, n: int, offset: int = 0) -> list[str
     return picked
 
 
+def _pick_full_year(bank: Bank, unit: str, func: str) -> list[str]:
+    """Like `_pick` with n=1, but only employees present for the whole journal year.
+
+    Skipped employees stay unused. For seeds where the first candidate already
+    qualifies, the choice is the same as `_pick`, so the output is unchanged.
+    """
+    from audit_workbench.synth.ledger import JOURNAL_AS_OF, YEAR_START  # noqa: PLC0415
+
+    entry = {r["employee_id"]: r["entry_date"] for r in bank.rows["hr_employees"]}
+    for emp_id in bank.groups[(unit, func)]:
+        if emp_id in bank.used_employees:
+            continue
+        exit_day = bank.emp_meta[emp_id]["exit_date"]
+        if entry[emp_id] <= YEAR_START.isoformat() and (
+            exit_day is None or exit_day > JOURNAL_AS_OF
+        ):
+            bank.used_employees.add(emp_id)
+            return [emp_id]
+    raise RuntimeError(f"no full-year injection target in {unit}/{func}")
+
+
 def _set_exit(bank: Bank, emp_id: str, exit_date) -> None:
     bank.emp_meta[emp_id]["exit_date"] = exit_date
     row = next(r for r in bank.rows["hr_employees"] if r["employee_id"] == emp_id)
@@ -297,7 +318,12 @@ def _inject_sod(bank: Bank) -> list[dict[str, str]]:
         ("Zahlungsverkehr", "Sonderaufgaben", "R-PAY-CLERK", "R-PAY-TEAMLEAD"),
         ("Rechnungswesen", "Sonderaufgaben", "R-GL-CLERK", "R-GL-APPROVER"),
     ]:
-        (emp_id,) = _pick(bank, unit, func, 1)
+        # The GL employee is reused for the B-08 self-approval cases, so they
+        # must be employed for the whole fiscal year (ledger.People.eligible).
+        if unit == "Rechnungswesen":
+            (emp_id,) = _pick_full_year(bank, unit, func)
+        else:
+            (emp_id,) = _pick(bank, unit, func, 1)
         system = bank.emp_meta[emp_id]["system"]
         account_a = _account_of(bank, emp_id)
         bank.assign(account_a, role_a, valid_from=VALID_FROM_INJECTED)
@@ -539,6 +565,26 @@ def _take(rng, pool, count: int):  # noqa: ANN001,ANN202
     return [pool[int(i)] for i in sorted(picks)]
 
 
+def _b07_originals(picks: list, pool: list) -> list:
+    """Replace picks whose clone would be entered no later than the original.
+
+    The clone of pick number *i* is entered on its posting date, which is the
+    original's posting date plus *i* days. For an original posted back into the
+    previous period (entered 3 April, posted 31 March) that date can fall on or
+    before the original's entry date, and B-07 reports the later entry. Such
+    a pick is swapped for the first unused same-day entry of the pool, without
+    a new random draw, so seeds that never hit the case keep their bytes.
+    """
+    taken = {id(e) for e in picks}
+    out = []
+    for delay, entry in enumerate(picks, start=1):
+        if _shift_to_workday(entry.posting_day, delay) <= entry.entry_day:
+            entry = next(e for e in pool if e.entry_day == e.posting_day and id(e) not in taken)
+            taken.add(id(entry))
+        out.append(entry)
+    return out
+
+
 def _invented_amount(rng) -> int:  # noqa: ANN001
     """Whole amount with a uniform first digit (invents a Benford departure)."""
     digit = int(rng.integers(1, 10))
@@ -730,7 +776,7 @@ def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[st
 
     # -- B-07: five manual entries posted twice --------------------------
     singles = _free(ledger, single=True, skip_preparer=b01_clerk)
-    for delay, original in enumerate(_take(rng, singles, 5), start=1):
+    for delay, original in enumerate(_b07_originals(_take(rng, singles, 5), singles), start=1):
         # a posting day inside the window and never on a weekend/holiday
         target = _shift_to_workday(original.posting_day, delay)
         clone = _clone_of(ledger, people, original, target)

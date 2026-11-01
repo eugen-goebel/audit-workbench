@@ -75,3 +75,21 @@ def test_second_seed_also_exact(tmp_path: Path) -> None:
     got = {(f.rule_id, f.entity) for f in findings}
     assert got == _want(truth)
     assert dict(Counter(f.rule_id for f in findings)) == SPEC_COUNTS
+
+
+@pytest.mark.parametrize("seed", [2, 19])
+def test_fragile_seeds_generate_and_match_full_ground_truth(tmp_path: Path, seed: int) -> None:
+    """Regressions found by a sweep over seeds 1 to 30 (all modules, via the CLI).
+
+    Seed 2: the cross-account GL employee joined in March 2025, was not
+    employed for the whole fiscal year, and the B-08 injection raised.
+    Seed 19: a B-07 original was posted back into March but entered in April,
+    so its clone was entered first and B-07 reported the original instead.
+    """
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from audit_workbench.cli import app  # noqa: PLC0415
+
+    directory = generate_bank(tmp_path / f"seed{seed}", seed=seed)
+    result = CliRunner().invoke(app, ["check-ground-truth", str(directory)])
+    assert result.exit_code == 0, result.output
