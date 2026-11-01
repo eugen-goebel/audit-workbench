@@ -193,7 +193,9 @@ def test_near_misses(request, directory_fixture: str) -> None:
         for _, row in data.active_assignments.iterrows()
         if row["account_id"] in acct_emp
     }
-    assert any(group_sizes[emp_peer[emp]] < 5 for emp, _role in holders)
+    # Orphan accounts (A-07) point to employee ids that are not in HR, so
+    # they have no peer group. Skip them instead of looking them up.
+    assert any(group_sizes[emp_peer[emp]] < 5 for emp, _role in sorted(holders) if emp in emp_peer)
 
 
 def test_generation_and_rules_are_fast(tmp_path: Path) -> None:
