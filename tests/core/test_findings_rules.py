@@ -97,3 +97,11 @@ def test_rule_subclass_must_define_metadata():
 
     with pytest.raises(TypeError, match="rule_id"):
         Broken()
+
+
+def test_registry_get_returns_class_and_rejects_unknown():
+    reg = RuleRegistry()
+    reg.register(_AlwaysOne)
+    assert reg.get("T-01") is _AlwaysOne
+    with pytest.raises(KeyError):
+        reg.get("nope")
