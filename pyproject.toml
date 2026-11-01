@@ -7,12 +7,14 @@ license = "MIT"
 authors = [{ name = "Eugen Goebel" }]
 requires-python = ">=3.12"
 dependencies = [
+    "holidays>=0.60",
     "networkx>=3.3",
     "numpy>=2.0",
     "pandas>=2.2",
     "pyarrow>=17",
     "pydantic>=2.8",
     "pyyaml>=6.0",
+    "scikit-learn>=1.6",
     "typer>=0.27",
 ]
 
