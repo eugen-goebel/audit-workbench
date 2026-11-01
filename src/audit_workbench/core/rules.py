@@ -68,6 +68,10 @@ class RuleRegistry:
     def ids(self) -> list[str]:
         return sorted(self._rules)
 
+    def get(self, rule_id: str) -> type[Rule]:
+        """The rule class registered under `rule_id`."""
+        return self._rules[rule_id]
+
     def run_all(
         self,
         data: Mapping[str, Any],

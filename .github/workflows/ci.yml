@@ -51,3 +51,28 @@ jobs:
         run: |
           echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
           uv run python -c "import xml.etree.ElementTree as ET; print(f\"Line coverage: {float(ET.parse('coverage.xml').getroot().get('line-rate'))*100:.1f}%\")" >> "$GITHUB_STEP_SUMMARY"
+
+  ground-truth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Generate banks and check findings against ground truth
+        run: |
+          # pipefail keeps awb's exit code through tee, so a mismatch fails the step.
+          # Both seeds are always checked; the step fails if either check failed.
+          set -o pipefail
+          status=0
+          for SEED in 7 11; do
+            uv run awb generate "data/generated/s$SEED" --seed "$SEED"
+            uv run awb check-ground-truth "data/generated/s$SEED" | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+          done
+          exit "$status"

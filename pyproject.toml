@@ -13,7 +13,11 @@ dependencies = [
     "pyarrow>=17",
     "pydantic>=2.8",
     "pyyaml>=6.0",
+    "typer>=0.27",
 ]
+
+[project.scripts]
+awb = "audit_workbench.cli:app"
 
 [dependency-groups]
 dev = [
