@@ -730,12 +730,26 @@ def _hash_files(directory: Path) -> dict[str, str]:
     }
 
 
+def _without_second_account(directory: Path, name: str) -> bytes:
+    """Module C appends one personal AD account (the newest AD id) to three module A files."""
+    accounts = read_csv(directory, "accounts.csv")
+    extra = max(a["account_id"] for a in accounts if a["system"] == "AD")
+    lines = (directory / name).read_bytes().splitlines(keepends=True)
+    return b"".join(line for line in lines if extra not in line.decode().rstrip("\n").split(","))
+
+
 def test_module_a_output_is_byte_identical(tmp_path: Path) -> None:
+    # Module C adds exactly one account (+ role assignment + recertification
+    # decision); without those rows the files are the ones from before.
+    appended = {"accounts.csv", "account_roles.csv", "recert_decisions.csv"}
     for seed, expected in MODULE_A_HASHES.items():
         directory = generate_bank(tmp_path / f"seed{seed}", seed=seed)
         for name in MODULE_A_FILES:
-            digest = hashlib.sha256((directory / name).read_bytes()).hexdigest()
-            assert digest == expected[name], f"{seed}/{name}"
+            if name in appended:
+                content = _without_second_account(directory, name)
+            else:
+                content = (directory / name).read_bytes()
+            assert hashlib.sha256(content).hexdigest() == expected[name], f"{seed}/{name}"
 
 
 def test_determinism_is_independent_of_hash_seed(tmp_path: Path) -> None:

@@ -90,6 +90,7 @@ def test_files_written(clean_dir: Path) -> None:
             "close_calendar.csv",
             "approval_limits.csv",
         }
+        | {"changes.csv", "change_approvals.csv", "commits.csv", "deployments.csv"}
         | {"ground_truth.json"}
     )
     assert {p.name for p in clean_dir.iterdir()} == expected

@@ -176,8 +176,11 @@ are covered by C-03, not here.
 ## 4. Synthetic change data and ground truth
 
 `generate_bank(...)` additionally writes the files from section 2 and appends
-the issues to `ground_truth.json`. The module A and B files and their ground
-truth stay byte-identical, so A (55/55) and B (42/42) are unaffected.
+the issues to `ground_truth.json`. Change data is generated last, with its
+own random generator derived from the seed, so it does not shift any A or B
+value. Module B files stay byte-identical. Module A files change only by the
+rows appended for the second AD account below. A (55/55) and B (42/42) stay
+unaffected, and their ground-truth entries stay identical.
 
 Requirements, as in modules A and B:
 
