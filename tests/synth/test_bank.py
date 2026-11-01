@@ -29,6 +29,15 @@ SPEC_COUNTS = {
 }
 
 
+def a_issues(truth: dict) -> set[tuple[str, str]]:
+    """Ground-truth keys of module A (module B issues live in the same file)."""
+    return {
+        (issue["rule_id"], issue["entity"])
+        for issue in truth["issues"]
+        if issue["rule_id"].startswith("A-")
+    }
+
+
 def load(directory: Path) -> AccessData:
     return AccessData(evidence=load_access_evidence(Path(directory)), as_of=AS_OF)
 
@@ -47,7 +56,7 @@ def test_injected_bank_matches_ground_truth(injected_dir: Path) -> None:
     findings = run_access_rules(load(injected_dir))
     truth = json.loads((injected_dir / "ground_truth.json").read_text())
     got = {(f.rule_id, f.entity) for f in findings}
-    want = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
+    want = a_issues(truth)
     missing = sorted(want - got)
     extra = sorted(got - want)
     assert not missing and not extra, f"missing={missing} extra={extra}"
@@ -72,7 +81,17 @@ def test_ground_truth_issues_sorted(injected_dir: Path) -> None:
 
 
 def test_files_written(clean_dir: Path) -> None:
-    expected = {f"{name}.csv" for name in load_access_evidence(clean_dir)} | {"ground_truth.json"}
+    expected = (
+        {f"{name}.csv" for name in load_access_evidence(clean_dir)}
+        | {
+            "gl_accounts.csv",
+            "journal_entries.csv",
+            "journal_lines.csv",
+            "close_calendar.csv",
+            "approval_limits.csv",
+        }
+        | {"ground_truth.json"}
+    )
     assert {p.name for p in clean_dir.iterdir()} == expected
 
 
@@ -92,8 +111,7 @@ def test_different_seed_changes_bytes_but_stays_exact(tmp_path: Path) -> None:
         findings = run_access_rules(load(directory))
         truth = json.loads((directory / "ground_truth.json").read_text())
         got = {(f.rule_id, f.entity) for f in findings}
-        want = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
-        assert got == want, directory
+        assert got == a_issues(truth), directory
         assert dict(Counter(f.rule_id for f in findings)) == SPEC_COUNTS
 
 
@@ -206,5 +224,4 @@ def test_generation_and_rules_are_fast(tmp_path: Path) -> None:
     assert elapsed < 20.0
     truth = json.loads((directory / "ground_truth.json").read_text())
     got = {(f.rule_id, f.entity) for f in findings}
-    want = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
-    assert got == want
+    assert got == a_issues(truth)

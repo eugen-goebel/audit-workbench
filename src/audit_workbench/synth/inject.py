@@ -25,6 +25,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+import numpy as np
+
 from audit_workbench.synth.bank import Bank, _ts
 
 VALID_FROM_INJECTED = "2026-07-01"
@@ -475,3 +477,442 @@ def inject_issues(bank: Bank) -> list[dict[str, str]]:
     if counts != EXPECTED_COUNTS:
         raise RuntimeError(f"injected counts {counts} != spec {EXPECTED_COUNTS}")
     return issues
+
+
+# ---------------------------------------------------------------------------
+# Module B: journal injections
+# ---------------------------------------------------------------------------
+
+#: fee tariffs an invented fee income account is fed with (B-02)
+FEE_TARIFFS = [
+    1_490,
+    2_900,
+    4_950,
+    7_900,
+    9_900,
+    12_500,
+    19_900,
+    24_900,
+    29_900,
+    39_900,
+    49_900,
+    99_900,
+]
+
+JOURNAL_COUNTS = {
+    "B-01": 1,
+    "B-02": 1,
+    "B-03": 2,
+    "B-04": 6,
+    "B-05": 8,
+    "B-06": 4,
+    "B-07": 5,
+    "B-08": 6,
+    "B-09": 5,
+    "B-10": 4,
+}
+
+
+def _free(
+    ledger,  # noqa: ANN001
+    *,
+    minimum: int | None = None,
+    single: bool = False,
+    skip_preparer: str = "",
+):  # noqa: ANN202
+    out = []
+    for entry in ledger.entries:
+        if entry.kind != "manual" or entry.frozen:
+            continue
+        if single and len(entry.segments) != 1:
+            continue
+        if minimum is not None and entry.total < minimum:
+            continue
+        if skip_preparer and entry.preparer == skip_preparer:
+            continue
+        out.append(entry)
+    return out
+
+
+def _take(rng, pool, count: int):  # noqa: ANN001,ANN202
+    picks = rng.choice(np.array(len(pool)), size=count, replace=False)
+    return [pool[int(i)] for i in sorted(picks)]
+
+
+def _invented_amount(rng) -> int:  # noqa: ANN001
+    """Whole amount with a uniform first digit (invents a Benford departure)."""
+    digit = int(rng.integers(1, 10))
+    exponent = int(rng.integers(2, 6))
+    return max(digit * 10**exponent + int(rng.integers(0, 10**exponent)), 1000)
+
+
+def _issue(rule_id: str, note: str, entry: object | None = None) -> dict[str, object]:
+    return {"rule_id": rule_id, "entity": "", "note": note, "entry": entry}
+
+
+def inject_journal(bank: Bank, ledger, rng: np.random.Generator) -> list[dict[str, object]]:
+    """Inject the journal issues of spec section 4 and return the ground truth.
+
+    The entities of all issues except B-01/B-02/B-03 are document numbers that
+    only exist after ``finalize_ledger``; they carry the entry in a private
+    key that ``resolve_journal_issues`` turns into the entity.
+    """
+    from audit_workbench.synth.ledger import (  # noqa: PLC0415
+        ACCOUNT_CLASS,
+        B04_HOLIDAYS,
+        FEE_ACCOUNT,
+        FEE_SEGMENTS,
+        MANUAL_LIMIT,
+        RARE_PAIRS,
+        ROUND_STEP,
+        WEEKEND_DAYS,
+        People,
+        Segment,
+        _to_round,
+        cross_account_employee,
+        first_workdays,
+        is_holiday,
+        last_workday_before,
+        mad_first,
+        month_end,
+        previous_period,
+    )
+
+    people = People.from_bank(bank)
+    issues: list[dict[str, object]] = []
+    clerk_accounts = [people.personal[c] for c in ledger.clerks]
+    near_miss_clerk = clerk_accounts[1]
+    b01_clerk = clerk_accounts[9]
+    b03_preparers = [clerk_accounts[4], clerk_accounts[6]]
+
+    # -- B-03: two preparers with far too many round amounts --------------
+    for account in b03_preparers:
+        entries = [e for e in ledger.entries if e.preparer == account and not e.frozen]
+        large = [e for e in entries if e.total >= ROUND_STEP]
+        if len(large) < 30:
+            raise RuntimeError(f"B-03 preparer {account} has only {len(large)} large entries")
+        targets = [e for e in large if len(e.segments) == 1 and e.total % ROUND_STEP != 0]
+        already = sum(1 for e in large if e.total % ROUND_STEP == 0)
+        need = min(max(int(0.4 * len(large)) - already, 1), len(targets))
+        for entry in _take(rng, targets, need):
+            entry.frozen = True
+            _to_round(entry)
+        rounded = sum(1 for e in large if e.total % ROUND_STEP == 0)
+        employee = people.employee_of(account)
+        issues.append(
+            {
+                "rule_id": "B-03",
+                "entity": employee,
+                "note": (
+                    f"{rounded} of the {len(large)} entries >= 1000.00 of {employee} "
+                    f"({account}) are round amounts (share {rounded / len(large):.2f})"
+                ),
+            }
+        )
+
+    # -- B-01: one preparer whose amounts are invented --------------------
+    edited = [e for e in ledger.entries if e.preparer == b01_clerk and not e.frozen]
+    for entry in edited:
+        entry.frozen = True
+        for seg in entry.segments:
+            seg.amount = _invented_amount(rng)
+    employee = people.employee_of(b01_clerk)
+    amounts = [s.amount for e in edited for s in e.segments]
+    issues.append(
+        {
+            "rule_id": "B-01",
+            "entity": employee,
+            "note": (
+                f"The {2 * len(amounts)} line amounts of {employee} ({b01_clerk}) have "
+                f"uniformly distributed first digits (MAD {mad_first(amounts):.3f})"
+            ),
+        }
+    )
+
+    # -- B-02: one fee income account fed with tariff amounts -------------
+    fee_entries = sorted(
+        (
+            e
+            for e in ledger.entries
+            if e.kind == "auto"
+            and len(e.segments) == FEE_SEGMENTS
+            and all(seg.credit == FEE_ACCOUNT for seg in e.segments)
+        ),
+        key=lambda e: (e.entry_day, e.entry_time),
+    )[-400:]
+    for idx, entry in enumerate(fee_entries):
+        for k in range(FEE_SEGMENTS):
+            entry.segments[k].amount = FEE_TARIFFS[(idx * FEE_SEGMENTS + k) % len(FEE_TARIFFS)]
+    issues.append(
+        {
+            "rule_id": "B-02",
+            "entity": FEE_ACCOUNT,
+            "note": (
+                f"Fee income account {FEE_ACCOUNT} is fed on the last {len(fee_entries)} "
+                f"nights with tariff amounts only (1.49, 4.95, 49.90, ...), so its "
+                f"first-two-digits distribution is far from Benford"
+            ),
+        }
+    )
+
+    # -- B-04: manual postings on weekends and public holidays ------------
+    off_days = list(B04_HOLIDAYS) + list(WEEKEND_DAYS)
+    pool = _free(ledger, skip_preparer=b01_clerk)
+    for day, entry in zip(off_days, _take(rng, pool, len(off_days)), strict=True):
+        entry.entry_day = day
+        entry.entry_time = f"{8 + int(rng.integers(0, 9)):02d}:{int(rng.integers(0, 60)):02d}:00"
+        entry.posting_day = day
+        entry.frozen = True
+        label = "public holiday" if is_holiday(day) else "weekend"
+        issues.append(_issue("B-04", f"Manual entry entered on {day} ({label})", entry))
+
+    # -- B-05: five post-closing entries (one combined with B-08) --------
+    cross = cross_account_employee(bank, people)
+    post_pool = [
+        e
+        for e in _free(ledger)
+        if e.entry_day.day >= 12 and previous_period(e.entry_day) in ledger.close_periods
+    ]
+    posts = _take(rng, post_pool, 5)
+    for idx, entry in enumerate(posts):
+        previous = month_end(previous_period(entry.entry_day))
+        entry.posting_day = last_workday_before(previous + timedelta(days=1))
+        entry.frozen = True
+        if idx == 0:
+            if entry.total < MANUAL_LIMIT:
+                entry.segments[0].amount += MANUAL_LIMIT - entry.total + 1
+            entry.preparer = people.personal[cross]
+            entry.approval = "self"
+        issues.append(
+            _issue(
+                "B-05",
+                f"Entry of {entry.entry_day} is posted into {entry.posting_day:%Y-%m} "
+                f"after that period was closed",
+                entry,
+            )
+        )
+    # three early reversals of period-end revenue
+    period_ends = [
+        last_workday_before(month_end(f"2025-{month:02d}") + timedelta(days=1))
+        for month in (2, 5, 8)
+    ]
+    for day, clerk in zip(period_ends, ledger.clerks[10:13], strict=True):
+        original = _manual_entry(
+            ledger,
+            people,
+            clerk,
+            day,
+            _invented_amount(rng) + 25_000,
+            "1500",
+            "4100",
+            "Abgrenzung Zinsertraege zum Monatsende",
+        )
+        reversal_day = first_workdays(day, 3)[2]
+        reversal = _manual_entry(
+            ledger,
+            people,
+            clerk,
+            reversal_day,
+            original.segments[0].amount,
+            "4100",
+            "1500",
+            "Storno Abgrenzung Zinsertraege",
+        )
+        reversal.reversal_of = original
+        issues.append(
+            _issue(
+                "B-05",
+                f"Entry of {day} (last days of the period) is reversed on "
+                f"{reversal_day}, inside the first days of the next period",
+                original,
+            )
+        )
+
+    # -- B-07: five manual entries posted twice --------------------------
+    singles = _free(ledger, single=True, skip_preparer=b01_clerk)
+    for delay, original in enumerate(_take(rng, singles, 5), start=1):
+        # a posting day inside the window and never on a weekend/holiday
+        target = _shift_to_workday(original.posting_day, delay)
+        clone = _clone_of(ledger, people, original, target)
+        # the amount of both entries must stay identical, so neither may be
+        # bumped by the duplicate resolution
+        original.frozen = original.protected = True
+        issues.append(
+            _issue(
+                "B-07",
+                f"Same amount and lines as the entry of {original.entry_day}, posted "
+                f"again {delay} day{'s' if delay > 1 else ''} later",
+                clone,
+            )
+        )
+    # near miss: an identical entry eight days later is outside the window
+    late = singles[-1]
+    if not late.frozen:
+        _clone_of(ledger, people, late, _shift_to_workday(late.posting_day, 8), protected=True)
+
+    # -- B-08: missing and self approval ---------------------------------
+    for entry in _take(rng, [e for e in _free(ledger, minimum=MANUAL_LIMIT)], 3):
+        entry.approval = "missing"
+        entry.frozen = True
+        issues.append(
+            _issue(
+                "B-08",
+                f"Entry of {people.employee_of(entry.preparer)} above the approval limit "
+                f"was never approved",
+                entry,
+            )
+        )
+    for _idx in range(2):
+        entry = _take(rng, [e for e in _free(ledger, minimum=MANUAL_LIMIT)], 1)[0]
+        entry.preparer = people.personal[cross]
+        entry.approval = "self"
+        entry.frozen = True
+        issues.append(
+            _issue(
+                "B-08",
+                f"Entry prepared and approved by {cross} through a second GL account of "
+                f"the same employee",
+                entry,
+            )
+        )
+    issues.append(
+        _issue(
+            "B-08",
+            f"Post-closing entry prepared and approved by {cross} "
+            f"(the same entry as the first B-05 finding)",
+            posts[0],
+        )
+    )
+
+    # -- B-09: rare debit/credit pairs ------------------------------------
+    plain = _free(ledger, single=True)
+    for (debit, credit), entry in zip(RARE_PAIRS, _take(rng, plain, len(RARE_PAIRS)), strict=True):
+        entry.segments[0] = Segment(debit, credit, entry.segments[0].amount)
+        entry.frozen = True
+        issues.append(
+            _issue(
+                "B-09",
+                f"Manual entry debits {debit} ({ACCOUNT_CLASS[debit]}) and credits "
+                f"{credit} ({ACCOUNT_CLASS[credit]}); this pair occurs in no other entry "
+                f"of the year",
+                entry,
+            )
+        )
+
+    # -- B-10: preparers who do not usually post --------------------------
+    admins = [
+        emp
+        for emp in sorted(people.personal)
+        if people.org_unit[emp] == "Rechnungswesen"
+        and people.job_function[emp] == "Administration"
+        and people.eligible(emp)
+    ]
+    revision = [
+        emp
+        for emp in sorted(people.personal)
+        if people.org_unit[emp] == "Revision" and people.eligible(emp)
+    ]
+    if len(admins) < 2 or len(revision) < 2:
+        raise RuntimeError("not enough unusual preparers for B-10")
+    unusual = [admins[0], admins[1], revision[0], revision[1]]
+    for emp, entry in zip(unusual, _take(rng, _free(ledger), 4), strict=True):
+        entry.preparer = people.personal[emp]
+        entry.frozen = True
+        issues.append(
+            _issue(
+                "B-10",
+                f"Manual entry prepared by {emp} "
+                f"({people.org_unit[emp]}/{people.job_function[emp]}), who does not "
+                f"usually post journal entries",
+                entry,
+            )
+        )
+
+    assert near_miss_clerk
+    return issues
+
+
+def _manual_entry(
+    ledger,  # noqa: ANN001
+    people,  # noqa: ANN001
+    employee: str,
+    day,
+    amount: int,
+    debit: str,
+    credit: str,
+    description: str,
+    *,
+    approver: str = "",
+) -> object:
+    """A new manual entry at the end of the ledger (frozen, not protected)."""
+    from audit_workbench.synth.ledger import Entry, Segment  # noqa: PLC0415
+
+    entry = Entry(
+        kind="manual",
+        entry_day=day,
+        entry_time="10:20:00",
+        posting_day=day,
+        preparer=people.personal[employee],
+        segments=[Segment(debit, credit, amount)],
+        description=description,
+        frozen=True,
+    )
+    entry.approver = approver
+    ledger.entries.append(entry)
+    return entry
+
+
+def _shift_to_workday(day, delay: int):
+    """*day* plus *delay* days, moved to the next working day if necessary."""
+    from audit_workbench.synth.ledger import JOURNAL_AS_OF, is_workday  # noqa: PLC0415
+
+    candidate = day + timedelta(days=delay)
+    for _ in range(7):
+        if is_workday(candidate) and candidate <= JOURNAL_AS_OF:
+            return candidate
+        candidate += timedelta(days=1)
+    raise RuntimeError(f"no working day after {day}")
+
+
+def _clone_of(
+    ledger,  # noqa: ANN001
+    people,  # noqa: ANN001
+    original,  # noqa: ANN001
+    day,
+    *,
+    protected: bool = False,
+) -> object:
+    from audit_workbench.synth.ledger import Entry, Segment  # noqa: PLC0415
+
+    clone = Entry(
+        kind="manual",
+        entry_day=day,
+        entry_time=original.entry_time,
+        posting_day=day,
+        preparer=original.preparer,
+        segments=[Segment(s.debit, s.credit, s.amount) for s in original.segments],
+        description=original.description,
+        protected=True,
+        frozen=True,
+    )
+    ledger.entries.append(clone)
+    assert people
+    return clone
+
+
+def resolve_journal_issues(issues: list[dict[str, object]]) -> list[dict[str, str]]:
+    """Turn the entry references of the ground truth into the document numbers."""
+    out: list[dict[str, str]] = []
+    for issue in issues:
+        entry = issue.get("entry")
+        entity = str(issue.get("entity") or "")
+        if entry is not None:
+            entity = entry.doc_no  # type: ignore[attr-defined]
+        out.append(
+            {
+                "rule_id": str(issue["rule_id"]),
+                "entity": entity,
+                "note": str(issue["note"]),
+            }
+        )
+    return out

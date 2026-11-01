@@ -26,6 +26,15 @@ SPEC_COUNTS = {
 }
 
 
+def _want(truth: dict) -> set[tuple[str, str]]:
+    """Module A keys: module B issues are appended to the same ground truth."""
+    return {
+        (issue["rule_id"], issue["entity"])
+        for issue in truth["issues"]
+        if issue["rule_id"].startswith("A-")
+    }
+
+
 def _run(directory: Path) -> tuple[list, dict]:
     data = AccessData(evidence=load_access_evidence(Path(directory)), as_of=AS_OF)
     findings = run_access_rules(data)
@@ -41,7 +50,7 @@ def bank(tmp_path_factory) -> Path:
 def test_findings_equal_ground_truth_exactly(bank: Path) -> None:
     findings, truth = _run(bank)
     got = {(f.rule_id, f.entity) for f in findings}
-    want = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
+    want = _want(truth)
     assert got == want, (
         f"differs from ground truth: missing={sorted(want - got)} extra={sorted(got - want)}"
     )
@@ -49,7 +58,7 @@ def test_findings_equal_ground_truth_exactly(bank: Path) -> None:
 
 def test_counts_match_spec_table(bank: Path) -> None:
     _, truth = _run(bank)
-    counts = Counter(i["rule_id"] for i in truth["issues"])
+    counts = Counter(i["rule_id"] for i in truth["issues"] if i["rule_id"].startswith("A-"))
     assert dict(counts) == SPEC_COUNTS
     assert truth["seed"] == 7 and truth["as_of"] == AS_OF.isoformat()
 
@@ -64,6 +73,5 @@ def test_second_seed_also_exact(tmp_path: Path) -> None:
     directory = generate_bank(tmp_path / "seed11", seed=11)
     findings, truth = _run(directory)
     got = {(f.rule_id, f.entity) for f in findings}
-    want = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
-    assert got == want
+    assert got == _want(truth)
     assert dict(Counter(f.rule_id for f in findings)) == SPEC_COUNTS

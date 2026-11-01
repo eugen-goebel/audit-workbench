@@ -1,8 +1,12 @@
 """Deterministic generator for the synthetic test bank "Musterbank AG".
 
 ``generate_bank(out_dir, seed=7, inject=True)`` writes all nine CSV files of
-the access schema (exact column order from ``access.data.SCHEMA``) plus
-``ground_truth.json``. With the same seed the output is byte-identical; only
+the access schema (exact column order from ``access.data.SCHEMA``), the five
+journal files of module B (``gl_accounts.csv``, ``journal_entries.csv``,
+``journal_lines.csv``, ``close_calendar.csv``, ``approval_limits.csv``) plus
+``ground_truth.json``. The journal ledger is built by
+``audit_workbench.synth.ledger`` from its own random stream
+(``default_rng([seed, 2])``), so the module A files stay byte-identical. With the same seed the output is byte-identical; only
 ``numpy.random.default_rng(seed)`` is used, never the global ``random``
 module or the wall clock.
 
@@ -664,7 +668,61 @@ def _build_clean(as_of: date, rng: np.random.Generator) -> Bank:
     return bank
 
 
-def _write(bank: Bank, out_dir: Path, seed: int, issues: list[dict[str, str]]) -> None:
+def _write_journal(
+    bank: Bank,
+    out_dir: Path,
+    seed: int,
+    inject: bool,
+) -> tuple[list[dict[str, str]], Any]:
+    """Build, inject, settle and write the module B ledger."""
+    from audit_workbench.synth.inject import (
+        inject_journal,
+        resolve_journal_issues,
+    )
+    from audit_workbench.synth.ledger import (
+        apply_completeness,
+        build_ledger,
+        check_clean_ledger,
+        finalize_ledger,
+        plan_completeness,
+        write_journal,
+    )
+
+    attempt = 0
+    problems: list[str] = []
+    for attempt in range(8):
+        probe_rng = np.random.default_rng([seed, 2, attempt])
+        probe = build_ledger(bank, probe_rng)
+        finalize_ledger(probe, np.random.default_rng([seed, 3, attempt]))
+        problems = check_clean_ledger(probe)
+        if not problems:
+            break
+    else:  # pragma: no cover - the generator is tuned so this does not happen
+        raise RuntimeError(f"ledger is not clean after 8 streams: {problems[:5]}")
+
+    rng = np.random.default_rng([seed, 2, attempt])
+    ledger = build_ledger(bank, rng)
+    issues: list = []
+    if inject:
+        issues = inject_journal(bank, ledger, rng)
+    finalize_ledger(ledger, np.random.default_rng([seed, 3, attempt]))
+    if inject:
+        plan_completeness(ledger, rng)
+        issues += list(apply_completeness(ledger))
+        journal_issues = resolve_journal_issues(issues)
+    else:
+        journal_issues = []
+    write_journal(ledger, out_dir)
+    return journal_issues, ledger
+
+
+def _write(
+    bank: Bank,
+    out_dir: Path,
+    seed: int,
+    issues: list[dict[str, str]],
+    journal_issues: list[dict[str, str]] | None = None,
+) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, columns in SCHEMA.items():
@@ -673,11 +731,18 @@ def _write(bank: Bank, out_dir: Path, seed: int, issues: list[dict[str, str]]) -
             writer = csv.DictWriter(fh, fieldnames=columns, lineterminator="\n")
             writer.writeheader()
             writer.writerows(rows)
-    payload = {
+    payload: dict[str, Any] = {
         "as_of": bank.as_of.isoformat(),
         "seed": seed,
         "issues": sorted(issues, key=lambda i: (i["rule_id"], i["entity"])),
     }
+    if journal_issues is not None:
+        from audit_workbench.synth.ledger import JOURNAL_AS_OF
+
+        payload["journal_as_of"] = JOURNAL_AS_OF.isoformat()
+        payload["issues"] = sorted(
+            issues + journal_issues, key=lambda i: (i["rule_id"], i["entity"])
+        )
     (out_dir / "ground_truth.json").write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
     )
@@ -698,5 +763,6 @@ def generate_bank(
         from audit_workbench.synth.inject import inject_issues
 
         issues = inject_issues(bank)
-    _write(bank, Path(out_dir), seed, issues)
+    journal_issues, _ledger = _write_journal(bank, Path(out_dir), seed, inject)
+    _write(bank, Path(out_dir), seed, issues, journal_issues)
     return Path(out_dir)
