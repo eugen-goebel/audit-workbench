@@ -121,11 +121,11 @@ TITLES_EMERGENCY = [
 P_PIPELINE = 0.70
 P_REJECT_FIRST = 0.04
 P_CANCELLED = 0.03
-NORMAL_ATTEMPTS = [0.45, 0.30, 0.17, 0.08]
+NORMAL_ATTEMPTS = [0.85, 0.11, 0.03, 0.01]
 STANDARD_ATTEMPTS = [0.90, 0.10]
 EMERGENCY_ATTEMPTS = [0.85, 0.15]
-# Production deployments reach the volume of the spec (about 2,600) because
-# the generator lets many normal changes fail and be redeployed.
+# About 15 % of production deployments fail or are rolled back and are then
+# redeployed, a realistic change failure rate.
 
 TS_FORMAT = "%Y-%m-%dT%H:%M:%S"
 

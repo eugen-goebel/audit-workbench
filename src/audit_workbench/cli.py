@@ -3,15 +3,17 @@
 Typical audit workflow:
 
 1. `awb generate`            build a synthetic bank (or point the tools at your own extract),
-2. `awb run`                 execute the access and journal-entry rules and list the exceptions,
+2. `awb run`                 execute the access, journal-entry and change rules and list the
+                             exceptions,
 3. `awb explain`             drill into one exception: rule, parameters, evidence, access path,
-                             or the journal entry with its lines,
+                             the journal entry with its lines, or the change with its approvals,
+                             commits and deployments,
 4. `awb benford`             look at the digit distributions behind the Benford findings,
 5. `awb check-ground-truth`  prove the rules find exactly the planted issues (used in CI).
 
 Every command is deterministic: same files and same audit date give the same findings
 and the same finding ids. Module A is the access review, module B the journal-entry
-testing.
+testing, module C the change management.
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ import typer
 
 from audit_workbench.access.data import AccessData, load_access_evidence
 from audit_workbench.access.rules import ACCESS_RULES, run_access_rules
+from audit_workbench.change.data import ChangeData, load_change_data, load_change_evidence
+from audit_workbench.change.rules import CHANGE_RULES, run_change_rules
 from audit_workbench.core.evidence import Evidence, EvidenceError
 from audit_workbench.core.findings import Finding, Severity
 from audit_workbench.journal.anomaly import rank_entries
@@ -43,7 +47,7 @@ _DESCRIPTION_WIDTH = 70
 
 app = typer.Typer(
     name="awb",
-    help="Audit workbench: access review and journal-entry tests on bank IT data.",
+    help="Audit workbench: access review, journal-entry and change management tests on bank IT data.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -84,6 +88,7 @@ class SeverityName(StrEnum):
 class ModuleName(StrEnum):
     a = "a"
     b = "b"
+    c = "c"
     all = "all"
 
 
@@ -128,13 +133,28 @@ def _resolve_b(directory: Path, as_of: datetime | None, truth: dict[str, Any] | 
     )
 
 
+def _resolve_c(directory: Path, as_of: datetime | None, truth: dict[str, Any] | None) -> date:
+    """`--as-of` wins; otherwise the change date (`change_as_of`) or the bank's `as_of`."""
+    if as_of is not None:
+        return as_of.date()
+    for key in ("change_as_of", "as_of"):
+        if truth is not None and key in truth:
+            return date.fromisoformat(truth[key])
+    raise _fail(
+        f"--as-of is required for module C because {directory / GROUND_TRUTH_FILE} "
+        "has no change_as_of",
+        EXIT_USAGE,
+    )
+
+
 def _load(
     directory: Path, as_of: datetime | None, module: ModuleName
-) -> tuple[AccessData | None, JournalData | None, list[Finding]]:
+) -> tuple[AccessData | None, JournalData | None, ChangeData | None, list[Finding]]:
     """Load the evidence the selected modules need and run their rules."""
     truth = _read_ground_truth(directory)
     access: AccessData | None = None
     journal: JournalData | None = None
+    change: ChangeData | None = None
     findings: list[Finding] = []
     try:
         if module in (ModuleName.a, ModuleName.all):
@@ -145,17 +165,22 @@ def _load(
         if module in (ModuleName.b, ModuleName.all):
             journal = load_journal_data(directory, as_of=_resolve_b(directory, as_of, truth))
             findings += run_journal_rules(journal)
+        if module in (ModuleName.c, ModuleName.all):
+            change = load_change_data(directory, as_of=_resolve_c(directory, as_of, truth))
+            findings += run_change_rules(change)
     except EvidenceError as exc:
         raise _fail(str(exc), EXIT_USAGE) from exc
-    return access, journal, findings
+    return access, journal, change, findings
 
 
 def _module_of(rule_id: str) -> str:
-    return "A" if rule_id.startswith("A-") else "B"
+    """Module letter of a rule id (`C-04` gives `C`); `?` for an id of no known module."""
+    prefix, dash, _ = rule_id.partition("-")
+    return prefix if dash and prefix in ("A", "B", "C") else "?"
 
 
 def _sorted(findings: list[Finding]) -> list[Finding]:
-    """Module A first, then most severe first, then by rule and entity."""
+    """Module A, B, C in that order, then most severe first, then by rule and entity."""
     return sorted(findings, key=lambda f: (_module_of(f.rule_id), -f.severity, f.rule_id, f.entity))
 
 
@@ -164,6 +189,8 @@ def _rule_title(rule_id: str) -> str:
         return ACCESS_RULES.get(rule_id).title
     if rule_id in JOURNAL_RULES.ids():
         return JOURNAL_RULES.get(rule_id).title
+    if rule_id in CHANGE_RULES.ids():
+        return CHANGE_RULES.get(rule_id).title
     return "(unknown rule)"
 
 
@@ -173,10 +200,12 @@ def _all_rule_ids(module: ModuleName = ModuleName.all, *extra: str) -> list[str]
         ids += ACCESS_RULES.ids()
     if module in (ModuleName.b, ModuleName.all):
         ids += JOURNAL_RULES.ids()
+    if module in (ModuleName.c, ModuleName.all):
+        ids += CHANGE_RULES.ids()
     return sorted({*ids, *extra})
 
 
-def _evidence(*datas: AccessData | JournalData | None) -> dict[str, Evidence]:
+def _evidence(*datas: AccessData | JournalData | ChangeData | None) -> dict[str, Evidence]:
     """Every input file of the loaded modules, once per file name."""
     out: dict[str, Evidence] = {}
     for data in datas:
@@ -225,6 +254,7 @@ def _render_table(
     evidence: dict[str, Evidence],
     as_of_a: date | None,
     as_of_b: date | None,
+    as_of_c: date | None,
     module: ModuleName,
 ) -> str:
     out: list[str] = []
@@ -232,6 +262,8 @@ def _render_table(
         out.append(f"Audit date (as_of): {as_of_a.isoformat()}")
     if as_of_b is not None:
         out.append(f"Journal as_of: {as_of_b.isoformat()}")
+    if as_of_c is not None:
+        out.append(f"Change as_of: {as_of_c.isoformat()}")
     out.append("")
     if findings:
         rows = [
@@ -312,15 +344,21 @@ def generate(
     """Create a synthetic bank with planted issues and a ground_truth.json.
 
     Use this to get reproducible test data. With --clean no issues are planted, which shows
-    that the rules stay silent on healthy data. The bank contains the access data of module A
-    and the journal ledger of module B.
+    that the rules stay silent on healthy data. The bank contains the access data of module A,
+    the journal ledger of module B and the change records of module C.
     """
     generate_bank(out_dir, seed=seed, inject=not clean)
     evidence = load_access_evidence(out_dir)
-    issues = len(_read_ground_truth(out_dir)["issues"])  # type: ignore[index]
+    change_evidence = load_change_evidence(out_dir)
+    issues = _read_ground_truth(out_dir)["issues"]  # type: ignore[index]
+    per_module = Counter(_module_of(i["rule_id"]) for i in issues)
     typer.echo(
         f"{out_dir}: {evidence['hr_employees'].rows} employees, "
-        f"{evidence['accounts'].rows} accounts, {issues} injected issues"
+        f"{evidence['accounts'].rows} accounts, "
+        f"{change_evidence['changes'].rows} changes, "
+        f"{change_evidence['deployments'].rows} deployments, "
+        f"{len(issues)} injected issues "
+        f"(A {per_module['A']}, B {per_module['B']}, C {per_module['C']})"
     )
 
 
@@ -338,7 +376,8 @@ def run(
         SeverityName, typer.Option(help="Hide findings below this severity.")
     ] = SeverityName.low,
     module: Annotated[
-        ModuleName, typer.Option("--module", help="Run module A (access), B (journal) or all.")
+        ModuleName,
+        typer.Option("--module", help="Run module A (access), B (journal), C (change) or all."),
     ] = ModuleName.all,
     rank: Annotated[
         int | None,
@@ -347,14 +386,15 @@ def run(
 ) -> None:
     """Run the audit rules and list the exceptions, most severe first.
 
-    By default module A (access review) and module B (journal-entry testing) run together.
+    By default module A (access review), module B (journal-entry testing) and module C
+    (change management) run together.
     The table ends with finding counts per rule and the SHA-256 prefix of every input file,
     so the run can be tied to the exact data it tested. Use --format json for the full
     finding records (ids, parameters, evidence hashes) and --format markdown for a report.
     --rank appends the anomaly ranking of manual journal entries; it is a sampling aid for
     choosing entries to inspect and deliberately does not produce findings.
     """
-    access, journal, findings = _load(data_dir, as_of, module)
+    access, journal, change, findings = _load(data_dir, as_of, module)
     threshold = Severity[min_severity.name.upper()]
     findings = _sorted([f for f in findings if f.severity >= threshold])
 
@@ -366,6 +406,7 @@ def run(
 
     as_of_a = access.as_of if access is not None else None
     as_of_b = journal.as_of if journal is not None else None
+    as_of_c = change.as_of if change is not None else None
 
     if output_format is OutputFormat.json:
         text = _render_json(findings)
@@ -376,7 +417,9 @@ def run(
                 journal, rank
             )
     else:
-        text = _render_table(findings, _evidence(access, journal), as_of_a, as_of_b, module)
+        text = _render_table(
+            findings, _evidence(access, journal, change), as_of_a, as_of_b, as_of_c, module
+        )
         if rank is not None and journal is not None:
             text += (
                 "\n\nAnomaly ranking (selection aid, not findings), top "
@@ -458,10 +501,123 @@ def _journal_entry_detail(journal: JournalData, doc_no: str) -> list[str]:
     return lines
 
 
+def _ts(ts: datetime) -> str:
+    return ts.isoformat()
+
+
+def _change_detail(change: ChangeData, finding: Finding) -> list[str]:
+    """The change behind a C finding: its record, approvals, commits and deployments.
+
+    C-01 and C-02 are reported per deployment (the entity is a deployment id); all other
+    rules are reported per change. A deployment without a change (or with one that is not in
+    the change file) is shown on its own, since there is no change record to print.
+    """
+    people = change.employees
+
+    def person(employee_id: Any) -> str:
+        if not isinstance(employee_id, str) or employee_id not in people.index:
+            return "-"
+        return f"{employee_id} ({people.at[employee_id, 'name']})"
+
+    flagged = None
+    change_id = finding.entity
+    if finding.rule_id in ("C-01", "C-02"):
+        flagged = next(
+            (d for d in change.prod_deployments if d.deployment_id == finding.entity), None
+        )
+        change_id = flagged.change_id if flagged is not None else ""
+        lines = [f"  Flagged deployment: {finding.entity}", ""]
+    else:
+        lines = []
+
+    deployments = change.deployments_by_change.get(change_id, [])
+    if flagged is not None and not deployments:
+        deployments = [flagged]  # no change to list it under
+    if change_id in change.changes.index:
+        row = change.changes.loc[change_id]
+        signoff = (
+            "none"
+            if row["test_signoff_ts"] is None
+            else f"{_ts(row['test_signoff_ts'])} by {person(row['tester_employee_id'])}"
+        )
+        lines += [
+            "  Change:",
+            f"    change_id:     {change_id}",
+            f"    system:        {row['system']}",
+            f"    type:          {row['change_type']}",
+            f"    risk:          {row['risk']}",
+            f"    title:         {row['title']}",
+            f"    requester:     {person(row['requester_employee_id'])}",
+            f"    created:       {_ts(row['created_ts'])}",
+            f"    status:        {row['status']}",
+            f"    test sign-off: {signoff}",
+            "",
+            "  Approvals (time order):",
+        ]
+        approvals = change.approvals.get(change_id, [])
+        if approvals:
+            lines.append(
+                _text_table(
+                    ["stage", "approver", "decision", "decided"],
+                    [
+                        [a.stage, person(a.approver_employee_id), a.decision, _ts(a.decided_ts)]
+                        for a in approvals
+                    ],
+                ).replace("\n", "\n    ")
+            )
+            lines[-1] = "    " + lines[-1]
+        else:
+            lines.append("    none")
+        commits = change.commits[change.commits["change_id"] == change_id].sort_values(
+            ["committed_ts", "commit_sha"]
+        )
+        lines += ["", "  Linked commits:"]
+        if commits.empty:
+            lines.append("    none")
+        else:
+            table = _text_table(
+                ["commit", "author", "committed"],
+                [
+                    [c.commit_sha, person(c.author_employee_id), _ts(c.committed_ts)]
+                    for c in commits.itertuples(index=False)
+                ],
+            )
+            lines.append("    " + table.replace("\n", "\n    "))
+    elif flagged is not None:
+        reason = (
+            "the deployment carries no change id"
+            if not change_id
+            else f"change {change_id} is not in changes.csv"
+        )
+        lines += [f"  Change: none ({reason})"]
+    if deployments:
+        lines += ["", "  Production deployments:"]
+        table = _text_table(
+            ["deployment", "deployed", "method", "account", "deploying employee", "result"],
+            [
+                [
+                    d.deployment_id,
+                    _ts(d.deployed_ts),
+                    d.method,
+                    d.account_id,
+                    person(d.deploying_employee_id),
+                    d.result,
+                ]
+                for d in deployments
+            ],
+        )
+        lines.append("    " + table.replace("\n", "\n    "))
+    return lines
+
+
 def _render_details(
-    finding: Finding, access: AccessData | None, journal: JournalData | None
+    finding: Finding,
+    access: AccessData | None,
+    journal: JournalData | None,
+    change: ChangeData | None = None,
 ) -> list[str]:
-    """Rule-specific detail: access paths for A-05, digit tables and entries for B."""
+    """Rule-specific detail: access paths for A-05, digit tables and entries for B, the change
+    with approvals, commits and deployments for C."""
     if finding.rule_id == "A-05":
         return [f"  {fn}: {' -> '.join(path)}" for fn, path in finding.details.items()]
     if finding.rule_id in ("B-01", "B-02"):
@@ -470,7 +626,17 @@ def _render_details(
         entry = _journal_entry_detail(journal, finding.entity)
         if entry:
             return entry
-    return [f"  {key}: {json.dumps(value, default=str)}" for key, value in finding.details.items()]
+    rule_details = [
+        f"{key}: {json.dumps(value, default=str)}" for key, value in finding.details.items()
+    ]
+    if change is not None and _module_of(finding.rule_id) == "C":
+        return [
+            *_change_detail(change, finding),
+            "",
+            "  Rule details:",
+            *[f"    {line}" for line in rule_details],
+        ]
+    return [f"  {line}" for line in rule_details]
 
 
 @app.command()
@@ -486,12 +652,15 @@ def explain(
     conflicts (A-05) each function is shown with the access path that grants it, for example
     `PAY-00042 -> R-PAY-TEAMLEAD -> R-PAY-RELEASE -> E-PAY-APPROVE`. For journal-entry
     findings the entry is shown with all its lines, the preparer and approver; for the
-    Benford rules B-01 and B-02 the digit table with expected and observed proportions.
+    Benford rules B-01 and B-02 the digit table with expected and observed proportions. For
+    change findings (module C) the change is shown with its approvals in time order, its
+    linked commits with their authors and every production deployment with the deploying
+    employee and the account used; a deployment without a change is shown on its own.
     """
-    access, journal, findings = _load(data_dir, as_of, ModuleName.all)
+    access, journal, change, findings = _load(data_dir, as_of, ModuleName.all)
     finding = _find_by_id_or_prefix(findings, finding_id)
 
-    evidence = _evidence(access, journal)
+    evidence = _evidence(access, journal, change)
     names = {ev.sha256: name for name, ev in evidence.items()}
     as_of_a = access.as_of if access is not None else None
     as_of_b = journal.as_of if journal is not None else None
@@ -500,6 +669,9 @@ def explain(
         audit_dates.append(as_of_a.isoformat())
     if as_of_b is not None and as_of_b != as_of_a:
         audit_dates.append(f"module B {as_of_b.isoformat()}")
+    as_of_c = change.as_of if change is not None else None
+    if as_of_c is not None and as_of_c != as_of_a:
+        audit_dates.append(f"module C {as_of_c.isoformat()}")
     lines = [
         f"Finding:     {finding.finding_id}",
         f"Rule:        {finding.rule_id} v{finding.rule_version} - {_rule_title(finding.rule_id)}",
@@ -515,7 +687,7 @@ def explain(
         *[f"  {names.get(h, '?'):<18} {h}" for h in finding.evidence],
         "",
         "Access paths:" if finding.rule_id == "A-05" else "Details:",
-        *_render_details(finding, access, journal),
+        *_render_details(finding, access, journal, change),
     ]
     lines += ["", "Regulation references: " + (", ".join(finding.regulation_refs) or "none")]
     typer.echo("\n".join(lines))
@@ -552,12 +724,14 @@ def _ground_truth_report(
     )
     verdict = "PASS" if expected == found else "FAIL"
     as_of_b = truth.get("journal_as_of", truth.get("as_of"))
+    as_of_c = truth.get("change_as_of", truth.get("as_of"))
     out = [
         "## Ground-truth check",
         "",
         f"- Seed: {truth.get('seed')}",
         f"- As of module A: {truth.get('as_of')}",
         f"- As of module B: {as_of_b}",
+        f"- As of module C: {as_of_c}",
         f"- Result: **{verdict}**",
         "",
         _md_table(
@@ -597,7 +771,7 @@ def check_ground_truth(data_dir: DataDir) -> None:
         raise _fail(
             f"{data_dir / GROUND_TRUTH_FILE} not found, nothing to compare with", EXIT_USAGE
         )
-    _, _, findings = _load(data_dir, None, ModuleName.all)
+    _, _, _, findings = _load(data_dir, None, ModuleName.all)
     found = {(f.rule_id, f.entity) for f in findings}
     expected = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
     typer.echo(_ground_truth_report(truth, found, expected))

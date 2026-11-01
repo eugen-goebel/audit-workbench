@@ -205,8 +205,8 @@ People, all taken from the existing HR data:
   appears in change data (that would mix in module A findings).
 
 Volume (approximate): 1,800 changes in the period (65 % normal, 30 %
-standard, 5 % emergency), 6,000 commits, 2,600 production deployments (some
-changes fail and are redeployed), 3,000 test deployments. About 70 % of
+standard, 5 % emergency), 6,000 commits, 1,850 production deployments (about
+15 % fail or are rolled back and are redeployed), 3,000 test deployments. About 70 % of
 production deployments go through the pipeline.
 
 Near misses that must not be flagged:
@@ -245,7 +245,7 @@ rule. The A ground-truth check proves that.
 
 ## 5. CLI
 
-- `awb run` runs modules A, B and C. `--module A|B|C` restricts the run.
+- `awb run` runs modules A, B and C. `--module a|b|c` restricts the run.
 - `awb check-ground-truth` reports A, B and C in one table, grouped by module.
 - `awb explain` shows for a C finding the change, its approvals in time
   order, the linked commits with authors, and each production deployment

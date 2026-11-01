@@ -412,11 +412,13 @@ def test_volumes_are_roughly_as_in_the_spec(bank: Bank) -> None:
     assert 5400 <= len(data.commits) <= 6600
     prod = data.deployments[data.deployments["environment"] == "prod"]
     test = data.deployments[data.deployments["environment"] == "test"]
-    assert 2300 <= len(prod) <= 2900
+    assert 1650 <= len(prod) <= 2050
     assert 2700 <= len(test) <= 3300
     assert 0.65 <= (prod["method"] == "pipeline").mean() <= 0.75
     assert set(changes["status"]) == {"closed", "cancelled", "in_progress"}
     assert set(prod["result"]) == {"success", "failed", "rolled_back"}
+    # Change failure rate in a realistic band, not every second attempt.
+    assert 0.08 <= (prod["result"] != "success").mean() <= 0.20
     assert len(prod) == len(data.prod_deployments)  # everything is inside the period
 
 
