@@ -441,3 +441,63 @@ def write_sample(sample: Sample, path: Path | str) -> Path:
         for item in sample.items:
             writer.writerow([item.rank, item.key, "true" if item.replacement else "false"])
     return path
+
+
+_HEADER_KEYS = ("population", "file", "file_sha256", "size", "n", "seed", "replacements")
+
+
+def _header_value(text: str) -> Any:
+    """A header value as `write_sample` wrote it: bool, int, float or text."""
+    if text in ("True", "False"):
+        return text == "True"
+    for convert in (int, float):
+        try:
+            return convert(text)
+        except ValueError:
+            continue
+    return text
+
+
+def read_sample(path: Path | str) -> Sample:
+    """Read a sample file written by `write_sample`; the inverse of that function.
+
+    Raises `ValueError` if the file is missing, lacks a header line or the item table,
+    or if the header `n` does not match the number of sampled rows.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"sample file not found: {path}")
+    header: dict[str, Any] = {}
+    items: list[SampleItem] = []
+    in_table = False
+    with path.open(encoding="utf-8", newline="") as fh:
+        for row in csv.reader(fh):
+            if not row:
+                continue
+            if not in_table and row[0].startswith("#"):
+                key, _, value = ",".join(row)[1:].partition(":")
+                header[key.strip()] = value.strip()
+            elif not in_table:
+                if row != ["rank", "key", "replacement"]:
+                    raise ValueError(f"{path}: expected the item table 'rank,key,replacement'")
+                in_table = True
+            else:
+                items.append(SampleItem(int(row[0]), row[1], row[2] == "true"))
+    if not in_table:
+        raise ValueError(f"{path}: no item table 'rank,key,replacement' found")
+    missing = [k for k in _HEADER_KEYS if k not in header]
+    if missing:
+        raise ValueError(f"{path}: header line {', '.join(missing)} is missing")
+    sample = Sample(
+        population=header["population"],
+        file=header["file"],
+        sha256=header["file_sha256"],
+        population_size=int(header["size"]),
+        seed=int(header["seed"]),
+        replacements=int(header["replacements"]),
+        parameters={k: _header_value(v) for k, v in header.items() if k not in _HEADER_KEYS},
+        items=tuple(items),
+    )
+    if sample.n != int(header["n"]):
+        raise ValueError(f"{path}: header n={header['n']} but the file has {sample.n} sample rows")
+    return sample

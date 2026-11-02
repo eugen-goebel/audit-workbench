@@ -3,7 +3,8 @@
 Design spec for the first part of phase 5. Code and tests are built against
 this document. If code and spec disagree, the spec is fixed first.
 
-Status: approved 2026-11-02 (decisions in section 10). Dashboard, API and
+Status: approved 2026-11-02 (decisions in section 10), implemented on branch
+`feat/workpaper`; section 11 records what the build settled. Dashboard, API and
 Docker are not part of this spec (section 9).
 
 ## 0. Why
@@ -161,3 +162,31 @@ commands keep working. CI installs the extra.
   the auditor completes them.
 - **E2** `python-docx` and `reportlab` are an optional extra `workpaper`.
 - **E3** API and Docker are kept for later, after the dashboard.
+
+## 11. Settled during the build
+
+- **Data hash** (footer, section 2): SHA-256 over the lines
+  `<file name> <sha256>` of all input files, sorted by file name, each line
+  ending in a line feed. Section 2 prints this definition.
+- **Section 6** is left out without `--sample`; sections 7 and 8 keep their
+  numbers, so a reference to "section 7" always means the same thing.
+- **Section 7** lists the CRITICAL and HIGH findings shown in section 5, so
+  `--min-severity critical` also drops the HIGH rows; section 4 still counts
+  everything and says how many findings are not listed.
+- **Periods covered** are read from the data, not hard-coded: the ledger runs
+  from its first to its last posting (2025-01-01 to 2026-02-28 for seed 7,
+  because the journal holds early-2026 postings), the change window from
+  `period_start` to `as_of`.
+- **Parameters** in section 3 are the rule's defaults plus the `as_of` of its
+  module; module X uses the access `as_of`.
+- **B-01 and B-02** (Benford) show the summary line and a pointer to
+  `awb explain <id>` instead of the digit table.
+- **PDF metadata** carries reportlab's fixed date (`invariant=1`); the run date
+  is in the document text.
+- **Exit codes:** missing extra, invalid `SOURCE_DATE_EPOCH` or a malformed
+  sample file exit 2; only a sample drawn from other data exits 1.
+- **Code layout:** run loading moved to `runner.py` and the text helpers to
+  `reporting.py`, so the workpaper reuses them without importing the CLI.
+  Renderer modules are `render_docx.py` and `render_pdf.py`, so they do not
+  shadow the `docx` package.
+

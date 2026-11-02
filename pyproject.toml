@@ -21,9 +21,16 @@ dependencies = [
 [project.scripts]
 awb = "audit_workbench.cli:app"
 
+[project.optional-dependencies]
+workpaper = [
+    "python-docx>=1.2.0",
+    "reportlab>=5.1.0",
+]
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",
+    "pypdf>=6.21.4",
     "pytest>=8.3",
     "pytest-cov>=5.0",
     "ruff>=0.6",

@@ -9,7 +9,8 @@ Typical audit workflow:
                              the journal entry with its lines, or the change with its approvals,
                              commits and deployments,
 4. `awb benford`             look at the digit distributions behind the Benford findings,
-5. `awb check-ground-truth`  prove the rules find exactly the planted issues (used in CI).
+5. `awb workpaper`           write the run as an audit workpaper (DOCX or PDF, ISA 230 layout),
+6. `awb check-ground-truth`  prove the rules find exactly the planted issues (used in CI).
 
 Every command is deterministic: same files and same audit date give the same findings
 and the same finding ids. Module A is the access review, module B the journal-entry
@@ -21,7 +22,6 @@ from __future__ import annotations
 import json
 from collections import Counter
 from datetime import date, datetime
-from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
@@ -29,27 +29,48 @@ from typing import Annotated, Any
 import typer
 
 from audit_workbench.access.data import AccessData, load_access_evidence
-from audit_workbench.access.rules import ACCESS_RULES, run_access_rules
-from audit_workbench.change.data import ChangeData, load_change_data, load_change_evidence
-from audit_workbench.change.rules import CHANGE_RULES, run_change_rules
+from audit_workbench.change.data import ChangeData, load_change_evidence
 from audit_workbench.core.evidence import Evidence, EvidenceError
 from audit_workbench.core.findings import Finding, Severity
-from audit_workbench.crosslink import CROSSLINK_RULES, run_crosslink_rules
 from audit_workbench.journal.anomaly import rank_entries
 from audit_workbench.journal.benford import benford_groups
 from audit_workbench.journal.data import JournalData, load_journal_data
-from audit_workbench.journal.rules import JOURNAL_RULES, run_journal_rules
+from audit_workbench.reporting import (
+    ModuleName,
+    all_rule_ids,
+    collect_evidence,
+    module_of,
+    render_details,
+    rule_title,
+    sorted_findings,
+    text_table,
+)
+from audit_workbench.runner import (
+    GROUND_TRUTH_FILE,
+    RunError,
+    load_run,
+    read_ground_truth,
+    resolve_a,
+    resolve_b,
+)
 from audit_workbench.sampling import (
     POPULATIONS,
     SelectionDates,
     evaluate,
     plan_sample,
+    read_sample,
     sample_size,
     write_sample,
 )
 from audit_workbench.synth import generate_bank
+from audit_workbench.workpaper.build import (
+    DEFAULT_TITLE,
+    SampleMismatchError,
+    build_document,
+    resolve_run_date,
+    verify_sample,
+)
 
-GROUND_TRUTH_FILE = "ground_truth.json"
 EXIT_FAILED = 1  # the check ran and found a problem (unknown finding, ground-truth mismatch)
 EXIT_USAGE = 2  # the command could not run (missing input, missing audit date)
 _DESCRIPTION_WIDTH = 70
@@ -99,14 +120,6 @@ class SampleMethod(StrEnum):
     hypergeometric = "hypergeometric"
 
 
-class ModuleName(StrEnum):
-    a = "a"
-    b = "b"
-    c = "c"
-    x = "x"
-    all = "all"
-
-
 # --- helpers -----------------------------------------------------------------
 
 
@@ -116,150 +129,38 @@ def _fail(message: str, code: int) -> typer.Exit:
 
 
 def _read_ground_truth(directory: Path) -> dict[str, Any] | None:
-    path = directory / GROUND_TRUTH_FILE
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_ground_truth(directory)
 
 
 def _resolve_a(directory: Path, as_of: datetime | None, truth: dict[str, Any] | None) -> date:
     """`--as-of` wins; otherwise take the access-review date from ground_truth.json."""
-    if as_of is not None:
-        return as_of.date()
-    if truth is None or "as_of" not in truth:
-        raise _fail(
-            f"--as-of is required because {directory / GROUND_TRUTH_FILE} does not exist",
-            EXIT_USAGE,
-        )
-    return date.fromisoformat(truth["as_of"])
+    try:
+        return resolve_a(directory, as_of.date() if as_of else None, truth)
+    except RunError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
 
 
 def _resolve_b(directory: Path, as_of: datetime | None, truth: dict[str, Any] | None) -> date:
     """`--as-of` wins; otherwise the journal date (`journal_as_of`) or the bank's `as_of`."""
-    if as_of is not None:
-        return as_of.date()
-    for key in ("journal_as_of", "as_of"):
-        if truth is not None and key in truth:
-            return date.fromisoformat(truth[key])
-    raise _fail(
-        f"--as-of is required for module B because {directory / GROUND_TRUTH_FILE} "
-        "has no journal_as_of",
-        EXIT_USAGE,
-    )
-
-
-def _resolve_c(directory: Path, as_of: datetime | None, truth: dict[str, Any] | None) -> date:
-    """`--as-of` wins; otherwise the change date (`change_as_of`) or the bank's `as_of`."""
-    if as_of is not None:
-        return as_of.date()
-    for key in ("change_as_of", "as_of"):
-        if truth is not None and key in truth:
-            return date.fromisoformat(truth[key])
-    raise _fail(
-        f"--as-of is required for module C because {directory / GROUND_TRUTH_FILE} "
-        "has no change_as_of",
-        EXIT_USAGE,
-    )
+    try:
+        return resolve_b(directory, as_of.date() if as_of else None, truth)
+    except RunError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
 
 
 def _load(
     directory: Path, as_of: datetime | None, module: ModuleName
 ) -> tuple[AccessData | None, JournalData | None, ChangeData | None, list[Finding]]:
     """Load the evidence the selected modules need and run their rules."""
-    truth = _read_ground_truth(directory)
-    access: AccessData | None = None
-    journal: JournalData | None = None
-    change: ChangeData | None = None
-    # Module X compares all three views, so it needs every data set even when only X is
-    # asked for. Its rules read the A/B/C findings to link a cross-module case to the
-    # single-module ones behind it, so those rules run as context and are filtered out
-    # afterwards when only X was requested.
-    needs_access = module in (ModuleName.a, ModuleName.all, ModuleName.x)
-    needs_journal = module in (ModuleName.b, ModuleName.all, ModuleName.x)
-    needs_change = module in (ModuleName.c, ModuleName.all, ModuleName.x)
     try:
-        if needs_access:
-            access = AccessData(
-                evidence=load_access_evidence(directory), as_of=_resolve_a(directory, as_of, truth)
-            )
-        if needs_journal:
-            journal = load_journal_data(directory, as_of=_resolve_b(directory, as_of, truth))
-        if needs_change:
-            change = load_change_data(directory, as_of=_resolve_c(directory, as_of, truth))
-        related: list[Finding] = []
-        if access is not None:
-            related += run_access_rules(access)
-        if journal is not None:
-            related += run_journal_rules(journal)
-        if change is not None:
-            related += run_change_rules(change)
-        findings: list[Finding] = list(related)
-        if module in (ModuleName.x, ModuleName.all) and access and journal and change:
-            findings += run_crosslink_rules(access, journal, change, related)
-        if module is ModuleName.x:
-            findings = [f for f in findings if _module_of(f.rule_id) == "X"]
-    except EvidenceError as exc:
+        run = load_run(directory, as_of.date() if as_of else None, module)
+    except RunError as exc:
         raise _fail(str(exc), EXIT_USAGE) from exc
-    return access, journal, change, findings
-
-
-def _module_of(rule_id: str) -> str:
-    """Module letter of a rule id (`C-04` gives `C`); `?` for an id of no known module."""
-    prefix, dash, _ = rule_id.partition("-")
-    return prefix if dash and prefix in ("A", "B", "C", "X") else "?"
-
-
-def _sorted(findings: list[Finding]) -> list[Finding]:
-    """Module A, B, C, X in that order, then most severe first, then by rule and entity."""
-    return sorted(findings, key=lambda f: (_module_of(f.rule_id), -f.severity, f.rule_id, f.entity))
-
-
-def _rule_title(rule_id: str) -> str:
-    if rule_id in ACCESS_RULES.ids():
-        return ACCESS_RULES.get(rule_id).title
-    if rule_id in JOURNAL_RULES.ids():
-        return JOURNAL_RULES.get(rule_id).title
-    if rule_id in CHANGE_RULES.ids():
-        return CHANGE_RULES.get(rule_id).title
-    if rule_id in CROSSLINK_RULES.ids():
-        return CROSSLINK_RULES.get(rule_id).title
-    return "(unknown rule)"
-
-
-def _all_rule_ids(module: ModuleName = ModuleName.all, *extra: str) -> list[str]:
-    ids: list[str] = []
-    if module in (ModuleName.a, ModuleName.all):
-        ids += ACCESS_RULES.ids()
-    if module in (ModuleName.b, ModuleName.all):
-        ids += JOURNAL_RULES.ids()
-    if module in (ModuleName.c, ModuleName.all):
-        ids += CHANGE_RULES.ids()
-    if module in (ModuleName.x, ModuleName.all):
-        ids += CROSSLINK_RULES.ids()
-    return sorted({*ids, *extra})
-
-
-def _evidence(*datas: AccessData | JournalData | ChangeData | None) -> dict[str, Evidence]:
-    """Every input file of the loaded modules, once per file name."""
-    out: dict[str, Evidence] = {}
-    for data in datas:
-        if data is None:
-            continue
-        for name, evidence in data.evidence.items():
-            out.setdefault(name, evidence)
-    return out
+    return run.access, run.journal, run.change, run.findings
 
 
 def _short(text: str, width: int = _DESCRIPTION_WIDTH) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
-
-
-def _text_table(headers: list[str], rows: list[list[str]]) -> str:
-    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
-    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths, strict=True)).rstrip()]
-    lines.append("  ".join("-" * w for w in widths))
-    lines += ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip() for r in rows]
-    return "\n".join(lines)
 
 
 def _md_cell(text: str) -> str:
@@ -274,10 +175,6 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
 
 def _percent(numerator: int, denominator: int) -> str:
     return "n/a" if denominator == 0 else f"{100 * numerator / denominator:.1f}%"
-
-
-def _money(cents: int) -> str:
-    return str(Decimal(int(cents)).scaleb(-2))
 
 
 # --- run: renderers ----------------------------------------------------------
@@ -303,7 +200,7 @@ def _render_table(
         rows = [
             [
                 f.finding_id,
-                _module_of(f.rule_id),
+                module_of(f.rule_id),
                 f.rule_id,
                 f.severity.name,
                 f.entity,
@@ -312,25 +209,25 @@ def _render_table(
             for f in findings
         ]
         out.append(
-            _text_table(["finding_id", "module", "rule", "severity", "entity", "description"], rows)
+            text_table(["finding_id", "module", "rule", "severity", "entity", "description"], rows)
         )
     else:
         out.append("No findings.")
     counts = Counter(f.rule_id for f in findings)
     out += ["", "Findings per rule:"]
     out.append(
-        _text_table(
+        text_table(
             ["module", "rule", "title", "count"],
             [
-                [_module_of(r), r, _rule_title(r), str(counts[r])]
-                for r in _all_rule_ids(module, *counts)
+                [module_of(r), r, rule_title(r), str(counts[r])]
+                for r in all_rule_ids(module, *counts)
             ]
             + [["", "Total", "", str(len(findings))]],
         )
     )
     out += ["", "Input files (SHA-256, first 12 characters):"]
     out.append(
-        _text_table(
+        text_table(
             ["file", "sha256", "rows"],
             [
                 [ev.path.name, ev.sha256[:12], str(ev.rows)]
@@ -349,7 +246,7 @@ def _render_rank(journal: JournalData, top: int) -> str:
         [str(row.rank), f"{row.score:.4f}", row.doc_no, row.preparer_employee_id]
         for row in ranked.itertuples(index=False)
     ]
-    return _text_table(["rank", "score", "doc_no", "preparer"], rows)
+    return text_table(["rank", "score", "doc_no", "preparer"], rows)
 
 
 def _render_json(findings: list[Finding]) -> str:
@@ -360,7 +257,7 @@ def _render_markdown(findings: list[Finding]) -> str:
     if not findings:
         return "No findings."
     rows = [
-        [f.finding_id, _module_of(f.rule_id), f.rule_id, f.severity.name, f.entity, f.description]
+        [f.finding_id, module_of(f.rule_id), f.rule_id, f.severity.name, f.entity, f.description]
         for f in findings
     ]
     return _md_table(["finding_id", "module", "rule", "severity", "entity", "description"], rows)
@@ -385,7 +282,7 @@ def generate(
     evidence = load_access_evidence(out_dir)
     change_evidence = load_change_evidence(out_dir)
     issues = _read_ground_truth(out_dir)["issues"]  # type: ignore[index]
-    per_module = Counter(_module_of(i["rule_id"]) for i in issues)
+    per_module = Counter(module_of(i["rule_id"]) for i in issues)
     typer.echo(
         f"{out_dir}: {evidence['hr_employees'].rows} employees, "
         f"{evidence['accounts'].rows} accounts, "
@@ -432,7 +329,7 @@ def run(
     """
     access, journal, change, findings = _load(data_dir, as_of, module)
     threshold = Severity[min_severity.name.upper()]
-    findings = _sorted([f for f in findings if f.severity >= threshold])
+    findings = sorted_findings([f for f in findings if f.severity >= threshold])
 
     if rank is not None:
         if output_format is OutputFormat.json:
@@ -454,7 +351,7 @@ def run(
             )
     else:
         text = _render_table(
-            findings, _evidence(access, journal, change), as_of_a, as_of_b, as_of_c, module
+            findings, collect_evidence(access, journal, change), as_of_a, as_of_b, as_of_c, module
         )
         if rank is not None and journal is not None:
             text += (
@@ -480,222 +377,6 @@ def _find_by_id_or_prefix(findings: list[Finding], wanted: str) -> Finding:
     return matches[0]
 
 
-def _benford_detail(details: dict[str, Any]) -> str:
-    """Digit table of a B-01/B-02 finding: expected versus observed proportions."""
-    digits = details.get("digits") or []
-    rows = [
-        [
-            str(d["digit"]),
-            f"{d['expected']:.4%}",
-            f"{d['observed']:.4%}",
-            str(d["count"]),
-            f"{d['z']:+.2f}",
-        ]
-        for d in digits
-    ]
-    summary = (
-        f"  n: {details.get('n')}, MAD: {details.get('mad'):.5f} "
-        f"(nonconformity limit {details.get('nonconformity_threshold')}), "
-        f"chi-square: {details.get('chi_square'):.2f}, "
-        f"assessment: {details.get('conformity')}"
-    )
-    return _text_table(["digit", "expected", "observed", "count", "z"], rows) + "\n" + summary
-
-
-def _journal_entry_detail(journal: JournalData, doc_no: str) -> list[str]:
-    """Header and lines of one journal entry, with the people behind the accounts."""
-    entries = journal.unique_entries
-    hit = entries[entries["doc_no"] == doc_no]
-    if hit.empty:
-        return []
-    row = hit.iloc[0]
-    people = journal.employees
-
-    def person(employee_id: Any) -> str:
-        if not isinstance(employee_id, str) or employee_id not in people.index:
-            return "-"
-        return f"{employee_id} ({people.at[employee_id, 'name']})"
-
-    lines = [
-        f"  doc_no:       {row['doc_no']}",
-        f"  source:       {row['source']}",
-        f"  posting date: {row['posting_date']}",
-        f"  entered:      {row['entry_ts']}",
-        f"  preparer:     {person(row['preparer_employee_id'])}",
-        f"  approver:     {person(row['approver_employee_id'])}",
-        f"  approved:     {row['approved_ts'] or '-'}",
-        f"  amount:       {_money(row['amount_cents'])}",
-        f"  description:  {row['description']}",
-        "",
-        "  Lines:",
-    ]
-    rows = [
-        [account, _money(debit), _money(credit)]
-        for account, debit, credit in journal.lines_by_doc.get(doc_no, [])
-    ]
-    lines.append("  " + _text_table(["account", "debit", "credit"], rows).replace("\n", "\n  "))
-    return lines
-
-
-def _ts(ts: datetime) -> str:
-    return ts.isoformat()
-
-
-def _change_detail(change: ChangeData, finding: Finding) -> list[str]:
-    """The change behind a C finding: its record, approvals, commits and deployments.
-
-    C-01 and C-02 are reported per deployment (the entity is a deployment id); all other
-    rules are reported per change. A deployment without a change (or with one that is not in
-    the change file) is shown on its own, since there is no change record to print.
-    """
-    people = change.employees
-
-    def person(employee_id: Any) -> str:
-        if not isinstance(employee_id, str) or employee_id not in people.index:
-            return "-"
-        return f"{employee_id} ({people.at[employee_id, 'name']})"
-
-    flagged = None
-    change_id = finding.entity
-    if finding.rule_id in ("C-01", "C-02"):
-        flagged = next(
-            (d for d in change.prod_deployments if d.deployment_id == finding.entity), None
-        )
-        change_id = flagged.change_id if flagged is not None else ""
-        lines = [f"  Flagged deployment: {finding.entity}", ""]
-    else:
-        lines = []
-
-    deployments = change.deployments_by_change.get(change_id, [])
-    if flagged is not None and not deployments:
-        deployments = [flagged]  # no change to list it under
-    if change_id in change.changes.index:
-        row = change.changes.loc[change_id]
-        signoff = (
-            "none"
-            if row["test_signoff_ts"] is None
-            else f"{_ts(row['test_signoff_ts'])} by {person(row['tester_employee_id'])}"
-        )
-        lines += [
-            "  Change:",
-            f"    change_id:     {change_id}",
-            f"    system:        {row['system']}",
-            f"    type:          {row['change_type']}",
-            f"    risk:          {row['risk']}",
-            f"    title:         {row['title']}",
-            f"    requester:     {person(row['requester_employee_id'])}",
-            f"    created:       {_ts(row['created_ts'])}",
-            f"    status:        {row['status']}",
-            f"    test sign-off: {signoff}",
-            "",
-            "  Approvals (time order):",
-        ]
-        approvals = change.approvals.get(change_id, [])
-        if approvals:
-            lines.append(
-                _text_table(
-                    ["stage", "approver", "decision", "decided"],
-                    [
-                        [a.stage, person(a.approver_employee_id), a.decision, _ts(a.decided_ts)]
-                        for a in approvals
-                    ],
-                ).replace("\n", "\n    ")
-            )
-            lines[-1] = "    " + lines[-1]
-        else:
-            lines.append("    none")
-        commits = change.commits[change.commits["change_id"] == change_id].sort_values(
-            ["committed_ts", "commit_sha"]
-        )
-        lines += ["", "  Linked commits:"]
-        if commits.empty:
-            lines.append("    none")
-        else:
-            table = _text_table(
-                ["commit", "author", "committed"],
-                [
-                    [c.commit_sha, person(c.author_employee_id), _ts(c.committed_ts)]
-                    for c in commits.itertuples(index=False)
-                ],
-            )
-            lines.append("    " + table.replace("\n", "\n    "))
-    elif flagged is not None:
-        reason = (
-            "the deployment carries no change id"
-            if not change_id
-            else f"change {change_id} is not in changes.csv"
-        )
-        lines += [f"  Change: none ({reason})"]
-    if deployments:
-        lines += ["", "  Production deployments:"]
-        table = _text_table(
-            ["deployment", "deployed", "method", "account", "deploying employee", "result"],
-            [
-                [
-                    d.deployment_id,
-                    _ts(d.deployed_ts),
-                    d.method,
-                    d.account_id,
-                    person(d.deploying_employee_id),
-                    d.result,
-                ]
-                for d in deployments
-            ],
-        )
-        lines.append("    " + table.replace("\n", "\n    "))
-    return lines
-
-
-def _crosslink_detail(journal: JournalData | None, finding: Finding) -> list[str]:
-    """A cross-module finding: the journal entries it rests on, then the rule details.
-
-    The entity is `<employee>:<conflict>`, so the entries come from `details["doc_nos"]`
-    rather than from the entity name.
-    """
-    out: list[str] = []
-    doc_nos = [str(doc) for doc in finding.details.get("doc_nos") or []]
-    if journal is not None:
-        for doc_no in doc_nos:
-            out += _journal_entry_detail(journal, doc_no)
-            out.append("")
-    out += [
-        "  Rule details:",
-        *[f"    {key}: {json.dumps(value, default=str)}" for key, value in finding.details.items()],
-    ]
-    return out
-
-
-def _render_details(
-    finding: Finding,
-    access: AccessData | None,
-    journal: JournalData | None,
-    change: ChangeData | None = None,
-) -> list[str]:
-    """Rule-specific detail: access paths for A-05, digit tables and entries for B, the change
-    with approvals, commits and deployments for C."""
-    if finding.rule_id == "A-05":
-        return [f"  {fn}: {' -> '.join(path)}" for fn, path in finding.details.items()]
-    if _module_of(finding.rule_id) == "X":
-        return _crosslink_detail(journal, finding)
-    if finding.rule_id in ("B-01", "B-02"):
-        return _benford_detail(finding.details).splitlines()
-    if journal is not None:
-        entry = _journal_entry_detail(journal, finding.entity)
-        if entry:
-            return entry
-    rule_details = [
-        f"{key}: {json.dumps(value, default=str)}" for key, value in finding.details.items()
-    ]
-    if change is not None and _module_of(finding.rule_id) == "C":
-        return [
-            *_change_detail(change, finding),
-            "",
-            "  Rule details:",
-            *[f"    {line}" for line in rule_details],
-        ]
-    return [f"  {line}" for line in rule_details]
-
-
 @app.command()
 def explain(
     data_dir: DataDir,
@@ -718,7 +399,7 @@ def explain(
     access, journal, change, findings = _load(data_dir, as_of, ModuleName.all)
     finding = _find_by_id_or_prefix(findings, finding_id)
 
-    evidence = _evidence(access, journal, change)
+    evidence = collect_evidence(access, journal, change)
     names = {ev.sha256: name for name, ev in evidence.items()}
     as_of_a = access.as_of if access is not None else None
     as_of_b = journal.as_of if journal is not None else None
@@ -732,7 +413,7 @@ def explain(
         audit_dates.append(f"module C {as_of_c.isoformat()}")
     lines = [
         f"Finding:     {finding.finding_id}",
-        f"Rule:        {finding.rule_id} v{finding.rule_version} - {_rule_title(finding.rule_id)}",
+        f"Rule:        {finding.rule_id} v{finding.rule_version} - {rule_title(finding.rule_id)}",
         f"Severity:    {finding.severity.name}",
         f"Entity:      {finding.entity}",
         f"Description: {finding.description}",
@@ -745,7 +426,7 @@ def explain(
         *[f"  {names.get(h, '?'):<18} {h}" for h in finding.evidence],
         "",
         "Access paths:" if finding.rule_id == "A-05" else "Details:",
-        *_render_details(finding, access, journal, change),
+        *render_details(finding, access, journal, change),
     ]
     lines += ["", "Regulation references: " + (", ".join(finding.regulation_refs) or "none")]
     typer.echo("\n".join(lines))
@@ -754,11 +435,11 @@ def explain(
 def _ground_truth_report(
     truth: dict[str, Any], found: set[tuple[str, str]], expected: set[tuple[str, str]]
 ) -> str:
-    rule_ids = _all_rule_ids(ModuleName.all, *(r for r, _ in expected | found))
+    rule_ids = all_rule_ids(ModuleName.all, *(r for r, _ in expected | found))
     rows: list[list[str]] = []
     totals: dict[str, list[int]] = {}
     for rule_id in rule_ids:
-        module = _module_of(rule_id)
+        module = module_of(rule_id)
         exp = {e for r, e in expected if r == rule_id}
         got = {e for r, e in found if r == rule_id}
         hits = len(exp & got)
@@ -767,7 +448,7 @@ def _ground_truth_report(
         t[1] += len(got)
         t[2] += hits
         rows.append(
-            [module, rule_id, _rule_title(rule_id), str(len(exp)), str(len(got)), str(hits)]
+            [module, rule_id, rule_title(rule_id), str(len(exp)), str(len(got)), str(hits)]
             + [_percent(hits, len(exp)), _percent(hits, len(got))]
         )
     for module, (exp_n, got_n, hit_n) in sorted(totals.items()):
@@ -977,6 +658,106 @@ def sample_size_command(
     typer.echo("\n".join(lines))
 
 
+WORKPAPER_FORMATS = (".docx", ".pdf")
+WORKPAPER_EXTRA_HINT = (
+    "awb workpaper needs the optional extra 'workpaper' (python-docx and reportlab). "
+    "Install it with: uv sync --extra workpaper  or  pip install 'audit-workbench[workpaper]'"
+)
+
+
+@app.command()
+def workpaper(
+    data_dir: DataDir,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            help="Output file; the format follows the suffix (.docx or .pdf). "
+            "Default: DATA_DIR/workpaper.docx.",
+        ),
+    ] = None,
+    as_of: AsOfOption = None,
+    module: Annotated[
+        ModuleName,
+        typer.Option(
+            "--module", help="Run module A (access), B (journal), C (change), X (cross) or all."
+        ),
+    ] = ModuleName.all,
+    min_severity: Annotated[
+        SeverityName, typer.Option(help="List only findings at or above this severity.")
+    ] = SeverityName.low,
+    sample: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--sample",
+            help="A sample file written by `awb sample`; repeat for several. Each becomes a "
+            "part of section 6.",
+        ),
+    ] = None,
+    preparer: Annotated[
+        str, typer.Option("--preparer", help="Name of the person who ran the work.")
+    ] = "",
+    title: Annotated[str, typer.Option("--title", help="Title of the workpaper.")] = DEFAULT_TITLE,
+) -> None:
+    """Write one run as an audit workpaper in DOCX or PDF.
+
+    The structure follows ISA 230 (paras. 8 and 9): cover, data basis with the SHA-256 of
+    every input file, procedures (rule, version, parameters, regulation references),
+    results per rule and severity, the findings with their evidence, the samples given
+    with --sample, significant matters and sign-off. Every number comes from the run.
+
+    The parts that need an auditor's judgment stay empty: the conclusions of section 7,
+    the result of each sampled item and the reviewer fields of section 8. Without
+    --preparer the preparer is shown as "not recorded". The extra 'workpaper' must be
+    installed (uv sync --extra workpaper). SOURCE_DATE_EPOCH fixes the run date, so the
+    same data gives the same text.
+    """
+    target = output or data_dir / "workpaper.docx"
+    suffix = target.suffix.lower()
+    if suffix not in WORKPAPER_FORMATS:
+        raise _fail(
+            f"unsupported output format {target.suffix!r}, use a .docx or .pdf file", EXIT_USAGE
+        )
+    try:
+        if suffix == ".docx":
+            from audit_workbench.workpaper.render_docx import render_docx as render
+        else:
+            from audit_workbench.workpaper.render_pdf import render_pdf as render
+    except ImportError as exc:
+        raise _fail(f"{WORKPAPER_EXTRA_HINT} ({exc})", EXIT_USAGE) from exc
+    try:
+        run_date = resolve_run_date()
+        samples = [read_sample(path) for path in sample or []]
+        for drawn in samples:
+            verify_sample(drawn, data_dir)
+    except SampleMismatchError as exc:
+        raise _fail(str(exc), EXIT_FAILED) from exc
+    except ValueError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
+
+    try:
+        run = load_run(data_dir, as_of.date() if as_of else None, module)
+    except RunError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
+    threshold = Severity[min_severity.name.upper()]
+    document = build_document(
+        run,
+        directory=data_dir,
+        module=module,
+        run_date=run_date,
+        min_severity=threshold,
+        samples=samples,
+        preparer=preparer,
+        title=title,
+    )
+    render(document, target)
+    listed = sum(1 for f in run.findings if f.severity >= threshold)
+    typer.echo(
+        f"wrote {target}: {listed} of {len(run.findings)} findings listed, "
+        f"{len(samples)} sample(s), data hash {document.data_hash[:12]}"
+    )
+
+
 @app.command()
 def benford(
     data_dir: DataDir,
@@ -1027,7 +808,7 @@ def benford(
         else "by account (first two digits)"
     )
     typer.echo("")
-    typer.echo(_text_table(["group", "n", "MAD", "chi-square", "assessment"], summary_rows))
+    typer.echo(text_table(["group", "n", "MAD", "chi-square", "assessment"], summary_rows))
     for key, result in details:
         typer.echo("")
         typer.echo(f"{key}: digit table")
@@ -1042,7 +823,7 @@ def benford(
             ]
             for r in table.itertuples(index=False)
         ]
-        typer.echo(_text_table(["digit", "expected", "observed", "count", "z"], rows))
+        typer.echo(text_table(["digit", "expected", "observed", "count", "z"], rows))
 
 
 if __name__ == "__main__":  # pragma: no cover
