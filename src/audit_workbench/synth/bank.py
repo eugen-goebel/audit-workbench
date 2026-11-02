@@ -569,16 +569,18 @@ def _add_workforce(bank: Bank) -> None:
         entry = date.fromisoformat(
             next(r for r in bank.rows["hr_employees"] if r["employee_id"] == emp_id)["entry_date"]
         )
+        created = entry + timedelta(days=3)
         account_id = bank.add_account(
             meta["system"],
             employee_id=emp_id,
-            created_at=_ts(entry + timedelta(days=3), 8, 0),
+            created_at=_ts(created, 8, 0),
             last_login="" if bank.has_left(emp_id) else bank.personal_login(),
         )
         if bank.has_left(emp_id):
             bank.rows["accounts"][-1]["status"] = "disabled"
         role_id = ROLE_MAP[(meta["unit"], meta["job_function"])]
-        bank.assign(account_id, role_id, valid_from=entry.isoformat())
+        # The role is granted when the account exists, not on the HR entry day.
+        bank.assign(account_id, role_id, valid_from=created.isoformat())
 
 
 def _add_shared_accounts(bank: Bank) -> None:
@@ -655,19 +657,22 @@ def _add_near_misses(bank: Bank) -> None:
     duo_emp = bank.groups[("Zahlungsverkehr", "Sonderaufgaben")][0]
     bank.used_employees.add(duo_emp)
     duo_acct = _account_of(bank, duo_emp)
-    # Granted on the entry date like every regular role, never before it.
-    duo_from = _entry_date(bank, duo_emp)
+    # Granted when the account was created, like every regular role.
+    duo_from = _created_day(bank, duo_acct)
     bank.assign(duo_acct, "R-PAY-CLERK", valid_from=duo_from)
     bank.assign(duo_acct, "R-PAY-BENE", valid_from=duo_from)
 
     # 9: a role that would be rare, but the peer group has fewer than 5 members.
     rare_emp = bank.groups[("Handel", "Sonderaufgaben")][1]
     bank.used_employees.add(rare_emp)
-    bank.assign(_account_of(bank, rare_emp), "R-TRD-TRADER", valid_from=_entry_date(bank, rare_emp))
+    rare_acct = _account_of(bank, rare_emp)
+    bank.assign(rare_acct, "R-TRD-TRADER", valid_from=_created_day(bank, rare_acct))
 
 
-def _entry_date(bank: Bank, emp_id: str) -> str:
-    return next(r for r in bank.rows["hr_employees"] if r["employee_id"] == emp_id)["entry_date"]
+def _created_day(bank: Bank, account_id: str) -> str:
+    return next(r for r in bank.rows["accounts"] if r["account_id"] == account_id)["created_at"][
+        :10
+    ]
 
 
 def _account_of(bank: Bank, emp_id: str) -> str:

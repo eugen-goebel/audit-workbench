@@ -229,10 +229,10 @@ def test_generation_and_rules_are_fast(tmp_path: Path) -> None:
 
 
 def _early_roles(directory: Path) -> list[tuple[str, str, str, str]]:
-    """Role assignments that start before the owner joined.
+    """Role assignments that start before the account exists or its owner joined.
 
-    Accounts without an HR owner (technical, generic, A-07 orphans) are checked
-    against their creation date instead.
+    Accounts without an HR owner (technical, generic, A-07 orphans) have only
+    their creation date as a bound.
     """
     import csv
 
@@ -241,10 +241,9 @@ def _early_roles(directory: Path) -> list[tuple[str, str, str, str]]:
     early = []
     for row in csv.DictReader(open(directory / "account_roles.csv")):
         account = accounts[row["account_id"]]
+        bounds = [account["created_at"][:10]] if account["created_at"] else []
         if account["employee_id"] in hr:
-            bounds = [hr[account["employee_id"]]["entry_date"]]
-        else:
-            bounds = [account["created_at"][:10]] if account["created_at"] else []
+            bounds.append(hr[account["employee_id"]]["entry_date"])
         for bound in bounds:
             if row["valid_from"] < bound:
                 early.append((row["account_id"], row["role_id"], row["valid_from"], bound))
