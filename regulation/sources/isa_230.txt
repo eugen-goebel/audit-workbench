@@ -1,0 +1,15 @@
+ISA 230 Audit Documentation (IAASB Handbook 2023-2024 edition), extracts: paragraphs 8 and 9
+Source: https://www.ibr-ire.be/docs/default-source/fr/documents/reglementation-et-publications/normes-et-recommandations/isa/isa-en-update-2026/a013_2023-2024-iaasb-hb_isa-230.pdf
+Publisher: International Auditing and Assurance Standards Board (IAASB); handbook extract as published by IBR-IRE
+Retrieved: 2026-11-02
+Licence: copyright IFAC; short excerpts quoted for non-commercial research and citation with attribution
+
+8. The auditor shall prepare audit documentation that is sufficient to enable an experienced auditor, having no previous connection with the audit, to understand: (Ref: Para. A2–A5, A16–A17)
+(a) The nature, timing and extent of the audit procedures performed to comply with the ISAs and applicable legal and regulatory requirements; (Ref: Para. A6–A7)
+(b) The results of the audit procedures performed, and the audit evidence obtained; and
+(c) Significant matters arising during the audit, the conclusions reached thereon, and significant professional judgments made in reaching those conclusions. (Ref: Para. A8–A11)
+
+9. In documenting the nature, timing and extent of audit procedures performed, the auditor shall record:
+(a) The identifying characteristics of the specific items or matters tested; (Ref: Para. A12)
+(b) Who performed the audit work and the date such work was completed; and
+(c) Who reviewed the audit work performed and the date and extent of such review. (Ref: Para. A13)
