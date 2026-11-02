@@ -21,15 +21,13 @@ from audit_workbench.change.data import ChangeData
 from audit_workbench.core.findings import Finding, Severity
 from audit_workbench.core.rules import Rule, RuleRegistry
 
-DORA_9_4_E = "DORA (EU) 2022/2554 Art. 9(4)(e): changes recorded, tested, approved"
-RTS_17_1_B = (
-    "RTS (EU) 2024/1774 Art. 17(1)(b): independence of approval from request and implementation"
-)
+DORA_9_4_E = "DORA Art. 9(4)(e): changes recorded, tested, approved"
+RTS_17_1_B = "RTS 2024/1774 Art. 17(1)(b): independence of approval from request and implementation"
 RTS_17_1_C_III = (
-    "RTS (EU) 2024/1774 Art. 17(1)(c)(iii): changes tested and finalised in a controlled manner"
+    "RTS 2024/1774 Art. 17(1)(c)(iii): changes tested and finalised in a controlled manner"
 )
-RTS_17_1_F = "RTS (EU) 2024/1774 Art. 17(1)(f): emergency changes with adequate safeguards"
-RTS_17_1_G = "RTS (EU) 2024/1774 Art. 17(1)(g): emergency changes approved after implementation"
+RTS_17_1_F = "RTS 2024/1774 Art. 17(1)(f): emergency changes with adequate safeguards"
+RTS_17_1_G = "RTS 2024/1774 Art. 17(1)(g): emergency changes approved after implementation"
 
 
 def _ctx(data: ChangeData) -> dict[str, str]:

@@ -34,10 +34,19 @@ from audit_workbench.change.data import ChangeData, load_change_data, load_chang
 from audit_workbench.change.rules import CHANGE_RULES, run_change_rules
 from audit_workbench.core.evidence import Evidence, EvidenceError
 from audit_workbench.core.findings import Finding, Severity
+from audit_workbench.crosslink import CROSSLINK_RULES, run_crosslink_rules
 from audit_workbench.journal.anomaly import rank_entries
 from audit_workbench.journal.benford import benford_groups
 from audit_workbench.journal.data import JournalData, load_journal_data
 from audit_workbench.journal.rules import JOURNAL_RULES, run_journal_rules
+from audit_workbench.sampling import (
+    POPULATIONS,
+    SelectionDates,
+    evaluate,
+    plan_sample,
+    sample_size,
+    write_sample,
+)
 from audit_workbench.synth import generate_bank
 
 GROUND_TRUTH_FILE = "ground_truth.json"
@@ -85,10 +94,16 @@ class SeverityName(StrEnum):
     critical = "critical"
 
 
+class SampleMethod(StrEnum):
+    binomial = "binomial"
+    hypergeometric = "hypergeometric"
+
+
 class ModuleName(StrEnum):
     a = "a"
     b = "b"
     c = "c"
+    x = "x"
     all = "all"
 
 
@@ -155,19 +170,34 @@ def _load(
     access: AccessData | None = None
     journal: JournalData | None = None
     change: ChangeData | None = None
-    findings: list[Finding] = []
+    # Module X compares all three views, so it needs every data set even when only X is
+    # asked for. Its rules read the A/B/C findings to link a cross-module case to the
+    # single-module ones behind it, so those rules run as context and are filtered out
+    # afterwards when only X was requested.
+    needs_access = module in (ModuleName.a, ModuleName.all, ModuleName.x)
+    needs_journal = module in (ModuleName.b, ModuleName.all, ModuleName.x)
+    needs_change = module in (ModuleName.c, ModuleName.all, ModuleName.x)
     try:
-        if module in (ModuleName.a, ModuleName.all):
+        if needs_access:
             access = AccessData(
                 evidence=load_access_evidence(directory), as_of=_resolve_a(directory, as_of, truth)
             )
-            findings += run_access_rules(access)
-        if module in (ModuleName.b, ModuleName.all):
+        if needs_journal:
             journal = load_journal_data(directory, as_of=_resolve_b(directory, as_of, truth))
-            findings += run_journal_rules(journal)
-        if module in (ModuleName.c, ModuleName.all):
+        if needs_change:
             change = load_change_data(directory, as_of=_resolve_c(directory, as_of, truth))
-            findings += run_change_rules(change)
+        related: list[Finding] = []
+        if access is not None:
+            related += run_access_rules(access)
+        if journal is not None:
+            related += run_journal_rules(journal)
+        if change is not None:
+            related += run_change_rules(change)
+        findings: list[Finding] = list(related)
+        if module in (ModuleName.x, ModuleName.all) and access and journal and change:
+            findings += run_crosslink_rules(access, journal, change, related)
+        if module is ModuleName.x:
+            findings = [f for f in findings if _module_of(f.rule_id) == "X"]
     except EvidenceError as exc:
         raise _fail(str(exc), EXIT_USAGE) from exc
     return access, journal, change, findings
@@ -176,11 +206,11 @@ def _load(
 def _module_of(rule_id: str) -> str:
     """Module letter of a rule id (`C-04` gives `C`); `?` for an id of no known module."""
     prefix, dash, _ = rule_id.partition("-")
-    return prefix if dash and prefix in ("A", "B", "C") else "?"
+    return prefix if dash and prefix in ("A", "B", "C", "X") else "?"
 
 
 def _sorted(findings: list[Finding]) -> list[Finding]:
-    """Module A, B, C in that order, then most severe first, then by rule and entity."""
+    """Module A, B, C, X in that order, then most severe first, then by rule and entity."""
     return sorted(findings, key=lambda f: (_module_of(f.rule_id), -f.severity, f.rule_id, f.entity))
 
 
@@ -191,6 +221,8 @@ def _rule_title(rule_id: str) -> str:
         return JOURNAL_RULES.get(rule_id).title
     if rule_id in CHANGE_RULES.ids():
         return CHANGE_RULES.get(rule_id).title
+    if rule_id in CROSSLINK_RULES.ids():
+        return CROSSLINK_RULES.get(rule_id).title
     return "(unknown rule)"
 
 
@@ -202,6 +234,8 @@ def _all_rule_ids(module: ModuleName = ModuleName.all, *extra: str) -> list[str]
         ids += JOURNAL_RULES.ids()
     if module in (ModuleName.c, ModuleName.all):
         ids += CHANGE_RULES.ids()
+    if module in (ModuleName.x, ModuleName.all):
+        ids += CROSSLINK_RULES.ids()
     return sorted({*ids, *extra})
 
 
@@ -358,7 +392,7 @@ def generate(
         f"{change_evidence['changes'].rows} changes, "
         f"{change_evidence['deployments'].rows} deployments, "
         f"{len(issues)} injected issues "
-        f"(A {per_module['A']}, B {per_module['B']}, C {per_module['C']})"
+        f"(A {per_module['A']}, B {per_module['B']}, C {per_module['C']}, X {per_module['X']})"
     )
 
 
@@ -377,7 +411,9 @@ def run(
     ] = SeverityName.low,
     module: Annotated[
         ModuleName,
-        typer.Option("--module", help="Run module A (access), B (journal), C (change) or all."),
+        typer.Option(
+            "--module", help="Run module A (access), B (journal), C (change), X (cross) or all."
+        ),
     ] = ModuleName.all,
     rank: Annotated[
         int | None,
@@ -386,8 +422,8 @@ def run(
 ) -> None:
     """Run the audit rules and list the exceptions, most severe first.
 
-    By default module A (access review), module B (journal-entry testing) and module C
-    (change management) run together.
+    By default module A (access review), module B (journal-entry testing), module C
+    (change management) and module X (cross-module cases) run together.
     The table ends with finding counts per rule and the SHA-256 prefix of every input file,
     so the run can be tied to the exact data it tested. Use --format json for the full
     finding records (ids, parameters, evidence hashes) and --format markdown for a report.
@@ -610,6 +646,25 @@ def _change_detail(change: ChangeData, finding: Finding) -> list[str]:
     return lines
 
 
+def _crosslink_detail(journal: JournalData | None, finding: Finding) -> list[str]:
+    """A cross-module finding: the journal entries it rests on, then the rule details.
+
+    The entity is `<employee>:<conflict>`, so the entries come from `details["doc_nos"]`
+    rather than from the entity name.
+    """
+    out: list[str] = []
+    doc_nos = [str(doc) for doc in finding.details.get("doc_nos") or []]
+    if journal is not None:
+        for doc_no in doc_nos:
+            out += _journal_entry_detail(journal, doc_no)
+            out.append("")
+    out += [
+        "  Rule details:",
+        *[f"    {key}: {json.dumps(value, default=str)}" for key, value in finding.details.items()],
+    ]
+    return out
+
+
 def _render_details(
     finding: Finding,
     access: AccessData | None,
@@ -620,6 +675,8 @@ def _render_details(
     with approvals, commits and deployments for C."""
     if finding.rule_id == "A-05":
         return [f"  {fn}: {' -> '.join(path)}" for fn, path in finding.details.items()]
+    if _module_of(finding.rule_id) == "X":
+        return _crosslink_detail(journal, finding)
     if finding.rule_id in ("B-01", "B-02"):
         return _benford_detail(finding.details).splitlines()
     if journal is not None:
@@ -653,7 +710,8 @@ def explain(
     `PAY-00042 -> R-PAY-TEAMLEAD -> R-PAY-RELEASE -> E-PAY-APPROVE`. For journal-entry
     findings the entry is shown with all its lines, the preparer and approver; for the
     Benford rules B-01 and B-02 the digit table with expected and observed proportions. For
-    change findings (module C) the change is shown with its approvals in time order, its
+    cross-module findings (module X) the journal entries the case rests on, for change
+    findings (module C) the change is shown with its approvals in time order, its
     linked commits with their authors and every production deployment with the deploying
     employee and the account used; a deployment without a change is shown on its own.
     """
@@ -777,6 +835,146 @@ def check_ground_truth(data_dir: DataDir) -> None:
     typer.echo(_ground_truth_report(truth, found, expected))
     if found != expected:
         raise typer.Exit(EXIT_FAILED)
+
+
+@app.command()
+def sample(
+    data_dir: DataDir,
+    population: Annotated[
+        str,
+        typer.Option("--population", help="Population to sample; see the command help."),
+    ],
+    confidence: Annotated[float, typer.Option("--confidence", help="Confidence level.")] = 0.95,
+    tolerable: Annotated[
+        float, typer.Option("--tolerable", help="Tolerable deviation rate.")
+    ] = 0.05,
+    expected: Annotated[float, typer.Option("--expected", help="Expected deviation rate.")] = 0.01,
+    seed: Annotated[int, typer.Option("--seed", help="Random seed; same seed, same sample.")] = 1,
+    method: Annotated[
+        SampleMethod, typer.Option("--method", help="Sample-size method.")
+    ] = SampleMethod.binomial,
+    replacements: Annotated[
+        int, typer.Option("--replacements", help="Replacement items to draw on top.")
+    ] = 5,
+    as_of: AsOfOption = None,
+    period_start: Annotated[
+        datetime | None,
+        typer.Option("--period-start", formats=["%Y-%m-%d"], help="Period start (YYYY-MM-DD)."),
+    ] = None,
+    period_end: Annotated[
+        datetime | None,
+        typer.Option("--period-end", formats=["%Y-%m-%d"], help="Period end (YYYY-MM-DD)."),
+    ] = None,
+    output: Annotated[
+        Path | None, typer.Option("--output", help="Write the sample file here.")
+    ] = None,
+) -> None:
+    """Draw an attribute sample from one population and write it as a file.
+
+    The sample size comes from the confidence, the tolerable deviation rate and the
+    expected deviation rate; the items come from a seeded random permutation, so the same
+    population, parameters and seed always give the same sample. The file starts with the
+    population, the input file SHA-256, the population size, the sample size, the seed and
+    all parameters, so a sample can be reproduced and defended later.
+
+    Populations: changes, deployments, manual_entries, recert_decisions,
+    active_personal_accounts. The period defaults to the twelve months ending at --as-of.
+    """
+    if population not in POPULATIONS:
+        known = ", ".join(sorted(POPULATIONS))
+        raise _fail(f"unknown population {population!r}, expected one of: {known}", EXIT_USAGE)
+    truth = _read_ground_truth(data_dir)
+    end = period_end.date() if period_end is not None else _resolve_a(data_dir, as_of, truth)
+    start = period_start.date() if period_start is not None else end.replace(year=end.year - 1)
+    dates = SelectionDates(as_of=end, period_start=start, period_end=end)
+    try:
+        drawn = plan_sample(
+            data_dir,
+            population,
+            confidence=confidence,
+            tolerable_rate=tolerable,
+            expected_rate=expected,
+            method=method.value,
+            seed=seed,
+            dates=dates,
+            replacements=replacements,
+        )
+    except (KeyError, ValueError) as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
+    target = output or data_dir / f"sample_{population}_seed{seed}.csv"
+    write_sample(drawn, target)
+    typer.echo(
+        "\n".join(
+            [
+                f"population:      {drawn.population} ({drawn.file})",
+                f"file sha256:     {drawn.sha256}",
+                f"population size: {drawn.population_size}",
+                f"sample size:     {drawn.n}",
+                f"replacements:    {drawn.replacements}",
+                f"seed:            {drawn.seed}",
+                *[f"{key + ':':<16} {value}" for key, value in sorted(drawn.parameters.items())],
+                "",
+                f"wrote {len(drawn.items)} rows to {target}",
+            ]
+        )
+    )
+
+
+@app.command("sample-size")
+def sample_size_command(
+    confidence: Annotated[float, typer.Option("--confidence", help="Confidence level.")] = 0.95,
+    tolerable: Annotated[
+        float, typer.Option("--tolerable", help="Tolerable deviation rate.")
+    ] = 0.05,
+    expected: Annotated[float, typer.Option("--expected", help="Expected deviation rate.")] = 0.01,
+    method: Annotated[
+        SampleMethod, typer.Option("--method", help="Sample-size method.")
+    ] = SampleMethod.binomial,
+    population: Annotated[
+        int | None, typer.Option("--population", help="Population size for the hypergeometric.")
+    ] = None,
+    deviations: Annotated[
+        int | None, typer.Option("--deviations", help="Deviations found, to evaluate a sample.")
+    ] = None,
+    n: Annotated[int | None, typer.Option("--n", help="Sample size, to evaluate a sample.")] = None,
+) -> None:
+    """The sample size for given parameters, without drawing anything.
+
+    With --n and --deviations the one-sided upper deviation limit of an evaluated sample is
+    shown and compared with the tolerable rate. The hypergeometric method needs --population.
+    """
+    try:
+        size = sample_size(
+            confidence,
+            tolerable,
+            expected,
+            method=method.value,
+            population=population if method is SampleMethod.hypergeometric else None,
+        )
+    except ValueError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
+    lines = [
+        f"method:              {size.method}",
+        f"confidence:          {size.confidence:.0%}",
+        f"tolerable rate:      {size.tolerable_rate:.2%}",
+        f"expected rate:       {size.expected_rate:.2%}",
+        f"population size:     {size.population if size.population is not None else '-'}",
+        f"sample size:         {size.n}",
+        f"deviations allowed:  {size.deviations_allowed}",
+        f"full population:     {'yes' if size.full_population else 'no'}",
+    ]
+    if n is not None and deviations is not None:
+        try:
+            result = evaluate(n, deviations, confidence, tolerable)
+        except ValueError as exc:
+            raise _fail(str(exc), EXIT_USAGE) from exc
+        lines += [
+            "",
+            f"evaluated sample:    n={n}, deviations={deviations}",
+            f"upper deviation limit: {result.upper_limit:.2%}",
+            f"within tolerable rate: {'yes' if result.within_tolerable else 'no'}",
+        ]
+    typer.echo("\n".join(lines))
 
 
 @app.command()

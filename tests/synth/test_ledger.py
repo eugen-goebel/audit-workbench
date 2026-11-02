@@ -52,11 +52,14 @@ MODULE_A_FILES = [
     "roles.csv",
 ]
 
-#: hashes of the module A files of the generator before the journal was added
+#: hashes of the module A files of the generator before the journal was added.
+#: ``accounts.csv`` and ``account_roles.csv`` carry the phase 4 changes (spec section 6):
+#: valid_from / created_at of the two GL SoD employees, the first-day assignment of one
+#: clerk and the last_login of the two developer leavers. The other files are unchanged.
 MODULE_A_HASHES = {
     7: {
-        "account_roles.csv": "a7d2bd786942d4da022e83e9649ba765b019257a348a20192951430afb3b0247",
-        "accounts.csv": "6768f39dcf98982c3cae80c263e83e8d1589194dcdc9ff28b65c7a837ead968a",
+        "account_roles.csv": "b8145f6906626ed3010bc721d6b371b88604a7e5a1ad434d62a80ad83a6cc07c",
+        "accounts.csv": "235a67e77645db57e8eff1a623534d0d7ba62c9c225da4e3b90b486669b07058",
         "entitlements.csv": "044dcc17d56e5f54625bc7344074ff050d08a38de691799de12b68852d9f1240",
         "hr_employees.csv": "e7fc77c235f48bc066b6c064c141740f484b1212e41764e3a5ddf41ad2454767",
         "recert_campaigns.csv": "c6542aaff615ed19c3340e36932eb8edfc23512a4a1adf1bfd9b1fac094c31b1",
@@ -66,8 +69,8 @@ MODULE_A_HASHES = {
         "roles.csv": "bfeffd47bba75d526af3a1aec197cf9c8e4d15340dff227713a64914629d29af",
     },
     11: {
-        "account_roles.csv": "109f4f6dbb3649ad366fbedafe243f9a51f27a44f9a5f511442dd4e30529a372",
-        "accounts.csv": "10d54b1373447a342b7e1a671e3bf053a00e429ae02db0a7c8ad11e05936cc54",
+        "account_roles.csv": "7d613408f904b246dd45c08061a2e2980d2da4cd120839380175fbfd44c6f270",
+        "accounts.csv": "eeed4815a97a5d259608b2d82b240f9659c8687ff466757744c2335711aa6a2e",
         "entitlements.csv": "044dcc17d56e5f54625bc7344074ff050d08a38de691799de12b68852d9f1240",
         "hr_employees.csv": "a3ca91017e8dd13a2ee567e268ba6d7f8b5facb333c40bdbecd1103f8135219f",
         "recert_campaigns.csv": "c6542aaff615ed19c3340e36932eb8edfc23512a4a1adf1bfd9b1fac094c31b1",

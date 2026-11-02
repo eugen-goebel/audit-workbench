@@ -343,6 +343,13 @@ class Bank:
         self.reviewer_pool: dict[str, list[str]] = {}
         self.used_employees: set[str] = set()
         self._counters: dict[str, int] = {}
+        #: stream for the cross-module (X) choices, ``default_rng([seed, 5])``;
+        #: set by ``generate_bank`` and used only after all A, B and C draws.
+        #: Module C has its own ``[seed, 4]``, so the two streams never mirror
+        #: each other.
+        self.xrng: np.random.Generator | None = None
+        #: employees and accounts the A injections hand over to the X cases
+        self.crosslink: dict[str, Any] = {}
 
     # -- employees -------------------------------------------------------
 
@@ -693,7 +700,7 @@ def _write_journal(
     for attempt in range(8):
         probe_rng = np.random.default_rng([seed, 2, attempt])
         probe = build_ledger(bank, probe_rng)
-        finalize_ledger(probe, np.random.default_rng([seed, 3, attempt]))
+        finalize_ledger(probe, np.random.default_rng([seed, 3, attempt]), seed=seed)
         problems = check_clean_ledger(probe)
         if not problems:
             break
@@ -704,8 +711,8 @@ def _write_journal(
     ledger = build_ledger(bank, rng)
     issues: list = []
     if inject:
-        issues = inject_journal(bank, ledger, rng)
-    finalize_ledger(ledger, np.random.default_rng([seed, 3, attempt]))
+        issues = inject_journal(bank, ledger, rng, bank.xrng)
+    finalize_ledger(ledger, np.random.default_rng([seed, 3, attempt]), seed=seed)
     if inject:
         plan_completeness(ledger, rng)
         issues += list(apply_completeness(ledger))
@@ -766,6 +773,7 @@ def generate_bank(
     """Write the synthetic bank into *out_dir* and return the directory."""
     rng = np.random.default_rng(seed)
     bank = _build_clean(as_of, rng)
+    bank.xrng = np.random.default_rng([seed, 5])
     issues: list[dict[str, str]] = []
     if inject:
         from audit_workbench.synth.inject import inject_issues
@@ -775,6 +783,9 @@ def generate_bank(
     # Module C comes last, with its own random stream, so no A or B value moves.
     from audit_workbench.synth.change import generate_change
 
-    change_issues = generate_change(bank, Path(out_dir), seed, inject, issues + journal_issues)
-    _write(bank, Path(out_dir), seed, issues, journal_issues, change_issues)
+    x_issues: list[dict[str, str]] = []
+    change_issues = generate_change(
+        bank, Path(out_dir), seed, inject, issues + journal_issues, x_issues
+    )
+    _write(bank, Path(out_dir), seed, issues, journal_issues, change_issues + x_issues)
     return Path(out_dir)

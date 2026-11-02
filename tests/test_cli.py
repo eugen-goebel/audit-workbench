@@ -14,9 +14,9 @@ from audit_workbench.cli import app
 from audit_workbench.core.evidence import sha256_file
 
 runner = CliRunner()
-# 55 access issues (module A) + 42 journal issues (module B) + 26 change issues (module C)
-ISSUES_A, ISSUES_B, ISSUES_C = 55, 42, 26
-TOTAL_ISSUES = ISSUES_A + ISSUES_B + ISSUES_C  # 123
+# 55 access issues (A) + 42 journal issues (B) + 26 change issues (C) + 8 cross-module (X)
+ISSUES_A, ISSUES_B, ISSUES_C, ISSUES_X = 55, 42, 26, 8
+TOTAL_ISSUES = ISSUES_A + ISSUES_B + ISSUES_C + ISSUES_X  # 131
 
 
 @pytest.fixture(scope="module")
@@ -64,7 +64,7 @@ def test_generate_prints_one_summary_line(tmp_path: Path) -> None:
     assert f"{TOTAL_ISSUES} injected issues" in lines[0]
     assert " employees" in lines[0] and " accounts" in lines[0]
     assert " changes" in lines[0] and " deployments" in lines[0]
-    assert f"(A {ISSUES_A}, B {ISSUES_B}, C {ISSUES_C})" in lines[0]
+    assert f"(A {ISSUES_A}, B {ISSUES_B}, C {ISSUES_C}, X {ISSUES_X})" in lines[0]
     assert (out / "ground_truth.json").is_file()
 
 
@@ -80,7 +80,7 @@ def test_generate_clean_has_no_issues(tmp_path: Path) -> None:
     result = runner.invoke(app, ["generate", str(out), "--clean"])
     assert result.exit_code == 0, result.output
     assert "0 injected issues" in result.stdout
-    assert "(A 0, B 0, C 0)" in result.stdout
+    assert "(A 0, B 0, C 0, X 0)" in result.stdout
     assert _truth(out)["issues"] == []
 
 
@@ -101,8 +101,8 @@ def test_run_table_lists_every_finding_with_summary_and_hashes(bank: Path) -> No
         assert finding["finding_id"] in out
     # the change date is stated next to the others
     assert "Change as_of: 2026-09-30" in out
-    # per-rule count summary, with the rules of all three modules
-    assert "A-05" in out and "B-10" in out and "C-06" in out and "Total" in out
+    # per-rule count summary, with the rules of all four modules
+    assert "A-05" in out and "B-10" in out and "C-06" in out and "X-03" in out and "Total" in out
     # traceability: first 12 hex chars of every input file's SHA-256
     for csv_file in sorted(bank.glob("*.csv")):
         assert csv_file.name in out
@@ -113,8 +113,8 @@ def test_run_table_is_sorted_by_severity_then_rule_then_entity(bank: Path) -> No
     findings = _run_json(bank)
     keys = [(f["rule_id"][0], -f["severity"], f["rule_id"], f["entity"]) for f in findings]
     assert keys == sorted(keys)
-    assert [k[0] for k in keys][:1] == ["A"] and [k[0] for k in keys][-1:] == ["C"]
-    assert {k[0] for k in keys} == {"A", "B", "C"}
+    assert [k[0] for k in keys][:1] == ["A"] and [k[0] for k in keys][-1:] == ["X"]
+    assert {k[0] for k in keys} == {"A", "B", "C", "X"}
     result = runner.invoke(app, ["run", str(bank)])
     positions = [result.stdout.index(f["finding_id"]) for f in findings]
     assert positions == sorted(positions)
@@ -137,6 +137,7 @@ def test_run_markdown_is_a_github_table(bank: Path) -> None:
     assert all(line.startswith("|") and line.endswith("|") for line in lines)
     assert len(lines) == TOTAL_ISSUES + 2
     assert sum(" | C | C-" in line for line in lines) == ISSUES_C
+    assert sum(" | X | X-" in line for line in lines) == ISSUES_X
 
 
 def test_run_output_option_writes_file_instead_of_stdout(bank: Path, tmp_path: Path) -> None:
@@ -273,8 +274,8 @@ def test_explain_unknown_id_exits_1(bank: Path) -> None:
 # --- check-ground-truth ------------------------------------------------------
 
 
-def test_check_ground_truth_passes_on_generated_bank(bank: Path) -> None:
-    result = runner.invoke(app, ["check-ground-truth", str(bank)])
+def test_check_ground_truth_passes_on_generated_bank(bank_copy: Path) -> None:
+    result = runner.invoke(app, ["check-ground-truth", str(bank_copy)])
     assert result.exit_code == 0, result.output
     out = result.stdout
     assert out.startswith("## ")
@@ -289,12 +290,17 @@ def test_check_ground_truth_passes_on_generated_bank(bank: Path) -> None:
     assert "| C | C-01 | Production deployment without an approved change | 6 | 6 | 6 |" in out
     assert "| C | C-02 | Developer deployed their own change | 5 | 5 | 5 | 100.0% | 100.0% |" in out
     assert "| C | **Total C** |  | 26 | 26 | 26 | 100.0% | 100.0% |" in out
+    assert (
+        "| X | X-01 | Conflicting functions held and used on one transaction | 2 | 2 | 2 |" in out
+    )
+    assert "| X | **Total X** |  | 8 | 8 | 8 | 100.0% | 100.0% |" in out
     rows = [line for line in out.splitlines() if line.startswith("| C | C-")]
     assert [r.split(" | ")[1] for r in rows] == [f"C-0{n}" for n in range(1, 7)]
     assert (
         out.index("| A | **Total A**")
         < out.index("| B | **Total B**")
         < out.index("| C | **Total C**")
+        < out.index("| X | **Total X**")
     )
     assert (
         f"|  | **Total** |  | {TOTAL_ISSUES} | {TOTAL_ISSUES} | {TOTAL_ISSUES} | 100.0% | 100.0% |"
@@ -312,7 +318,7 @@ def test_check_ground_truth_fails_when_a_finding_is_not_in_ground_truth(bank_cop
     assert "Unexpected" in result.stdout
     assert f"`{removed['rule_id']}` `{removed['entity']}`" in result.stdout
     assert "Missed" not in result.stdout
-    precision = f"{100 * (TOTAL_ISSUES - 1) / TOTAL_ISSUES:.1f}%"  # 122 of 123 findings
+    precision = f"{100 * (TOTAL_ISSUES - 1) / TOTAL_ISSUES:.1f}%"  # 130 of 131 findings
     assert precision == "99.2%"
     assert (
         f"|  | **Total** |  | {TOTAL_ISSUES - 1} | {TOTAL_ISSUES} | {TOTAL_ISSUES - 1} | "
@@ -703,3 +709,141 @@ def test_explain_states_a_change_date_that_differs_from_the_audit_date(bank_copy
     (bank_copy / "ground_truth.json").write_text(json.dumps(truth))
     finding = _c_finding(bank_copy, "C-02")
     assert "module C 2026-06-30" in _explain(bank_copy, finding)
+
+
+# --- module X ----------------------------------------------------------------
+
+
+def _x_finding(directory: Path, rule_id: str, **details: object) -> dict:
+    """First module X finding of *rule_id*, optionally narrowed by detail values."""
+    for finding in _run_json(directory):
+        if finding["rule_id"] != rule_id:
+            continue
+        if all(finding["details"].get(key) == value for key, value in details.items()):
+            return finding
+    raise AssertionError(f"no {rule_id} finding with {details} in {directory}")
+
+
+def test_run_module_x_only(bank: Path) -> None:
+    findings = _run_json(bank, "--module", "x")
+    assert len(findings) == ISSUES_X
+    assert all(f["rule_id"].startswith("X-") for f in findings)
+    want = {(i["rule_id"], i["entity"]) for i in _truth(bank)["issues"] if i["rule_id"][0] == "X"}
+    assert {(f["rule_id"], f["entity"]) for f in findings} == want
+
+
+def test_run_module_x_table_only_shows_cross_module_rules(bank: Path) -> None:
+    result = runner.invoke(app, ["run", str(bank), "--module", "x"])
+    assert result.exit_code == 0, result.output
+    out = result.stdout
+    assert "X-03" in out and "X-01" in out
+    assert "A-05" not in out and "B-10" not in out and "C-06" not in out
+    assert "Findings per rule:" in out and "Total" in out
+    # module X reads the access, journal and change files, so all of them are listed
+    for name in ("accounts.csv", "journal_entries.csv", "changes.csv", "deployments.csv"):
+        assert name in out
+
+
+def test_run_module_x_findings_carry_regulation_references(bank: Path) -> None:
+    """The mapping fills the references of the cross-module rules (spec section 5)."""
+    for finding in _run_json(bank, "--module", "x"):
+        assert finding["regulation_refs"], f"{finding['rule_id']} has no reference"
+        assert any("Art. 21" in ref or "Art. 9(4)" in ref for ref in finding["regulation_refs"])
+
+
+def test_explain_x_shows_the_entries_behind_the_case(bank: Path) -> None:
+    finding = _x_finding(bank, "X-01")
+    out = _explain(bank, finding)
+    assert "X-01 v1.0.0 - Conflicting functions held and used on one transaction" in out
+    first_doc_no = finding["details"]["doc_nos"][0]
+    assert first_doc_no in out
+    assert "Rule details:" in out
+    assert "doc_nos" in out and "held_on_as_of" in out
+
+
+def test_explain_x03_shows_the_action_after_the_exit(bank: Path) -> None:
+    finding = _x_finding(bank, "X-03")
+    out = _explain(bank, finding)
+    assert "days_after_exit_max" in out
+    assert "actions" in out and finding["entity"] in out
+
+
+# --- sampling ----------------------------------------------------------------
+
+
+def test_sample_writes_a_reproducible_file(tmp_path: Path, bank: Path) -> None:
+    """Same population, same parameters, same seed: same bytes (spec section 4)."""
+    first = tmp_path / "s1.csv"
+    second = tmp_path / "s2.csv"
+    for target in (first, second):
+        result = runner.invoke(
+            app,
+            [
+                "sample",
+                str(bank),
+                "--population",
+                "manual_entries",
+                "--seed",
+                "2",
+                "--output",
+                str(target),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+    assert first.read_bytes() == second.read_bytes()
+    header = first.read_text().splitlines()[:3]
+    assert header[0] == "# population: manual_entries"
+    assert header[1].startswith("# file: ")
+    assert header[2].startswith("# file_sha256: ")
+    text = first.read_text()
+    for key in ("# size:", "# n:", "# seed: 2", "# confidence:", "# tolerable_rate:"):
+        assert key in text
+    assert (
+        "wrote"
+        in runner.invoke(
+            app, ["sample", str(bank), "--population", "manual_entries", "--output", str(first)]
+        ).stdout
+    )
+
+
+def test_sample_default_output_goes_next_to_the_data(tmp_path: Path, bank: Path) -> None:
+    target = bank / "sample_manual_entries_seed3.csv"
+    result = runner.invoke(
+        app, ["sample", str(bank), "--population", "manual_entries", "--seed", "3"]
+    )
+    assert result.exit_code == 0, result.output
+    assert target.is_file()
+    target.unlink()
+
+
+def test_sample_rejects_an_unknown_population(bank: Path) -> None:
+    result = runner.invoke(app, ["sample", str(bank), "--population", "nope"])
+    assert result.exit_code == 2
+    assert "unknown population" in result.output
+    assert "manual_entries" in result.output
+
+
+def test_sample_size_prints_the_plan_without_data() -> None:
+    result = runner.invoke(app, ["sample-size", "--confidence", "0.95", "--tolerable", "0.05"])
+    assert result.exit_code == 0, result.output
+    assert "sample size:" in result.stdout
+    assert "deviations allowed:" in result.stdout
+    assert "full population:     no" in result.stdout
+
+
+def test_sample_size_hypergeometric_needs_a_population() -> None:
+    ok = runner.invoke(app, ["sample-size", "--method", "hypergeometric", "--population", "1000"])
+    assert ok.exit_code == 0, ok.output
+    assert "population size:     1000" in ok.stdout
+    missing = runner.invoke(app, ["sample-size", "--method", "hypergeometric"])
+    assert missing.exit_code == 2
+
+
+def test_sample_size_evaluates_a_drawn_sample() -> None:
+    """The upper deviation limit decides whether the sample passed (spec section 4)."""
+    result = runner.invoke(app, ["sample-size", "--n", "93", "--deviations", "1"])
+    assert result.exit_code == 0, result.output
+    assert "upper deviation limit:" in result.stdout
+    assert "within tolerable rate: yes" in result.stdout
+    too_many = runner.invoke(app, ["sample-size", "--n", "93", "--deviations", "12"])
+    assert "within tolerable rate: no" in too_many.stdout

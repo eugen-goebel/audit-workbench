@@ -176,3 +176,55 @@ class AccessData:
 
     def is_privileged(self, role_id: str) -> bool:
         return any(bool(self.roles.at[r, "privileged"]) for r in self.roles_within(role_id))
+
+    # --- rights at a point in time (phase 4 spec, section 1) -------------
+
+    @cached_property
+    def assignments(self) -> pd.DataFrame:
+        """All role assignments with parsed validity, whatever the audit date."""
+        df = self.evidence["account_roles"].frame.copy()
+        df["valid_from"] = _to_date(df["valid_from"])
+        df["valid_to"] = _to_date(df["valid_to"])
+        return df
+
+    @cached_property
+    def _assignments_by_account(self) -> dict[str, list[tuple[str, date, date | None]]]:
+        out: dict[str, list[tuple[str, date, date | None]]] = {}
+        for row in self.assignments.itertuples(index=False):
+            out.setdefault(row.account_id, []).append((row.role_id, row.valid_from, row.valid_to))
+        return out
+
+    @cached_property
+    def _role_functions(self) -> dict[str, frozenset[str]]:
+        g = self.role_graph
+        functions = self.entitlements["business_function"]
+        return {
+            role: frozenset(
+                functions[n] for n in nx.descendants(g, role) if g.nodes[n]["kind"] == "entitlement"
+            )
+            for role in self.roles.index
+        }
+
+    def granting_roles(self, account_id: str, function: str, day: date) -> list[str]:
+        """Directly assigned roles that give *account_id* the *function* on *day*.
+
+        The account must exist on that day (`created_at` date <= day) and the
+        assignment must be valid on it, both limits inclusive. Sorted, unique.
+        """
+        if account_id not in self.accounts.index:
+            return []
+        created = self.accounts.at[account_id, "created_at"]
+        if pd.isna(created) or created.date() > day:
+            return []
+        return sorted(
+            {
+                role
+                for role, start, end in self._assignments_by_account.get(account_id, [])
+                if start <= day
+                and (end is None or end >= day)
+                and function in self._role_functions.get(role, frozenset())
+            }
+        )
+
+    def holds_function(self, account_id: str, function: str, day: date) -> bool:
+        return bool(self.granting_roles(account_id, function, day))

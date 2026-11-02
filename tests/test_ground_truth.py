@@ -91,5 +91,6 @@ def test_fragile_seeds_generate_and_match_full_ground_truth(tmp_path: Path, seed
     from audit_workbench.cli import app  # noqa: PLC0415
 
     directory = generate_bank(tmp_path / f"seed{seed}", seed=seed)
+    # the CLI runs A, B, C and X, so the whole ground truth is compared, X rows included
     result = CliRunner().invoke(app, ["check-ground-truth", str(directory)])
     assert result.exit_code == 0, result.output

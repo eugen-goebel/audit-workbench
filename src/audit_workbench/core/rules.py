@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from audit_workbench.core.findings import Finding, Severity
+from audit_workbench.regulation.mapping import apply_references
 
 
 class Rule(ABC):
@@ -82,4 +83,7 @@ class RuleRegistry:
         for rule_id in self.ids():
             rule = self._rules[rule_id](**params.get(rule_id, {}))
             findings.extend(rule.run(data))
-        return findings
+        # Attached here rather than in each rule: the mapping is per rule id, so one
+        # call covers access, journal, change and cross-module findings alike. Rules
+        # that already name their provision keep their own wording.
+        return apply_references(findings)

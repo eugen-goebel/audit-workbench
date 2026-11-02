@@ -1008,6 +1008,137 @@ def inject_changes(
     return issues
 
 
+def _commit_days(ch: Chg) -> list[date]:
+    """Working days on which an extra commit fits into the life cycle of *ch*.
+
+    Strictly after the creation day and strictly before the day of the first
+    sign-off, approval or production deployment, so the commit precedes them.
+    """
+    stamps = [ch.first.ts] + [a.ts for a in ch.approvals]
+    if ch.signoff:
+        stamps.append(ch.signoff)
+    lo = ch.created.date() + timedelta(days=1)
+    hi = min(stamps).date() - timedelta(days=1)
+    return _workdays(lo, hi) if lo <= hi else []
+
+
+def inject_crosslink_activity(
+    g: Gen,
+    bank: Bank,
+    model: Model,
+    reserved: set[int],
+    known_issues: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """X-03 and its near misses (phase 4 spec, section 6, item 3).
+
+    * The two developer leavers of A-01 (account still active, Entwicklung) each
+      author one commit on a change after their exit date. The change is deployed
+      by an operator or release manager, never by the leaver. Their ``last_login``
+      moves after the commit, so A-01 reports ``logged_in_after_exit``; the note of
+      that A-01 ground-truth row is rewritten in place.
+    * Near miss: a leaver (disabled account) commits on the exit date itself.
+    * Near miss: a leaver (disabled account) commits only before the exit date.
+
+    Commits go to unreserved, closed normal changes, so no C rule is touched.
+    """
+    hr = {r["employee_id"]: r for r in bank.rows["hr_employees"]}
+    accounts = {r["account_id"]: r for r in bank.rows["accounts"]}
+    leavers = []
+    for issue in known_issues:
+        if issue["rule_id"] != "A-01":
+            continue
+        account = accounts[issue["entity"]]
+        employee = account["employee_id"]
+        if hr[employee]["org_unit"] == "Entwicklung":
+            leavers.append((employee, issue))
+    if len(leavers) != 2:
+        raise RuntimeError(f"expected 2 developer leavers in A-01, found {len(leavers)}")
+
+    pool = [
+        (c, _commit_days(c))
+        for c in model.changes
+        if c.ctype == "normal" and c.status == "closed" and c.prod and c.seq not in reserved
+    ]
+    pool = [(c, days) for c, days in pool if days]
+    chosen: set[int] = set()
+    b = model.builder
+    assert b is not None
+
+    def add_commit(employee: str, accept: Any) -> tuple[Commit, Chg]:
+        options = [
+            (c, [d for d in days if accept(d)])
+            for c, days in pool
+            if c.seq not in chosen and any(accept(d) for d in days)
+        ]
+        if not options:
+            raise RuntimeError(f"no change fits a commit of {employee}")
+        ch, days = g.pick(options)
+        day = g.pick(days)
+        chosen.add(ch.seq)
+        sha = bytes(g.rng.bytes(20)).hex()
+        while sha in b.shas:
+            sha = bytes(g.rng.bytes(20)).hex()
+        b.shas.add(sha)
+        commit = Commit(sha, ch.system, employee, work_ts(g, day, 8, 18), ch)
+        ch.commits.append(commit)
+        return commit, ch
+
+    out: list[dict[str, str]] = []
+    for employee, issue in leavers:
+        exit_day = date.fromisoformat(hr[employee]["exit_date"])
+        commit, ch = add_commit(employee, lambda d, x=exit_day: d > x)
+        row = accounts[issue["entity"]]
+        login = commit.ts + timedelta(minutes=g.ri(5, 90))
+        row["last_login"] = _fmt(login)
+        issue["note"] = (
+            f"Account {issue['entity']} of leaver {employee} (exit {exit_day}) "
+            f"is still active and was used after the exit"
+        )
+        days_after = (commit.ts.date() - exit_day).days
+        out.append(
+            {
+                "rule_id": "X-03",
+                "entity": employee,
+                "note": (
+                    f"Leaver {employee} (exit {exit_day}) authored commit {commit.sha[:8]} "
+                    f"on {commit.ts.date()}, {days_after} days after the exit, on change "
+                    f"{ch.cid}, which someone else deployed"
+                ),
+            }
+        )
+
+    # near misses: disabled leavers of Entwicklung (exit dates inside the period)
+    clean = [
+        e
+        for func in ("Sachbearbeitung", "Analyse")
+        for e in bank.groups[("Entwicklung", func)][:2]
+        if hr[e]["exit_date"] and accounts[_account_of_employee(bank, e)]["status"] == "disabled"
+    ]
+    on_exit = before_exit = ""
+    for employee in clean:
+        exit_day = date.fromisoformat(hr[employee]["exit_date"])
+        if not on_exit and exit_day.weekday() < 5:
+            try:
+                add_commit(employee, lambda d, x=exit_day: d == x)
+            except RuntimeError:
+                continue
+            on_exit = employee
+        elif not before_exit:
+            try:
+                add_commit(employee, lambda d, x=exit_day: d < x)
+            except RuntimeError:
+                continue
+            before_exit = employee
+    if not (on_exit and before_exit):
+        raise RuntimeError("no leaver found for the X-03 near misses")
+    bank.crosslink["x03_near_miss"] = {"on_exit_date": on_exit, "before_exit": before_exit}
+    return out
+
+
+def _account_of_employee(bank: Bank, employee: str) -> str:
+    return next(a for a, m in bank.acct_meta.items() if m["employee_id"] == employee)
+
+
 def _count(issues: list[Issue]) -> dict[str, int]:
     out: dict[str, int] = {}
     for issue in issues:
@@ -1127,8 +1258,14 @@ def generate_change(
     seed: int,
     inject: bool,
     known_issues: list[dict[str, Any]] | None = None,
+    crosslink_issues: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Write the four change files; return the ground-truth issues (empty without injection).
+
+    With ``inject=True`` and a list for *crosslink_issues*, the X-03 cases of phase 4
+    are added after all C draws (own random stream ``bank.xrng``): extra commits of
+    leavers, appended to *crosslink_issues*. The A-01 notes and ``last_login`` of the
+    two developer leavers in *known_issues* and ``bank`` change accordingly.
 
     With ``inject=True`` one extra personal AD account (with role assignment
     and recertification decision) is appended to ``bank.rows``; the caller
@@ -1146,6 +1283,12 @@ def generate_change(
         # C-04 and C-06 share a change and so do C-02 and C-05: count per rule
         if counts != EXPECTED_COUNTS:
             raise RuntimeError(f"injected counts {counts} != spec {EXPECTED_COUNTS}")
+    if inject and crosslink_issues is not None:
+        if bank.xrng is None:
+            raise RuntimeError("bank.xrng is not set")
+        crosslink_issues += inject_crosslink_activity(
+            Gen(bank.xrng), bank, model, reserved, known_issues or []
+        )
     _check_period(model)
     rows = _rows(model)
     write_change(rows, Path(out_dir))
