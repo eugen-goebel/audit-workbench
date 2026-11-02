@@ -7,7 +7,7 @@
 
 Data-driven IT audit tests for banks: access review, segregation of duties, journal entry testing and change management. Everything runs on a synthetic bank with known, injected issues, so every detection rule can be checked against ground truth.
 
-> **Status:** module A (access review and segregation of duties), module B (journal entry testing) and module C (change management) are complete. The cross-module view, the workpaper and the dashboard follow phase by phase.
+> **Status:** modules A (access review and segregation of duties), B (journal entry testing), C (change management) and X (cross-module cases) are complete, and so is the audit workpaper (DOCX and PDF). The dashboard follows.
 
 ## Scope and boundaries
 
@@ -26,6 +26,10 @@ uv run awb run data/generated/demo --module c      # change management only
 uv run awb explain data/generated/demo <finding-id>
 uv run awb benford data/generated/demo --by employee   # digit tables behind B-01/B-02
 uv run awb check-ground-truth data/generated/demo  # compare against the injected issues
+
+uv sync --extra workpaper                          # once: python-docx and reportlab for the workpaper
+uv run awb workpaper data/generated/demo --preparer "A. Auditor"      # writes workpaper.docx
+uv run awb workpaper data/generated/demo --output demo.pdf            # the same, as PDF
 ```
 
 ## Module A: access review and segregation of duties
@@ -98,6 +102,47 @@ The bank plants 8 cross-module cases (X-01 2, X-02 4, X-03 2) and near misses th
 Two smaller parts complete the workflow. `regulation/mapping.yaml` maps every rule id to the provision it tests, with a verbatim quote and the official URL; the quote is checked against the stored text in `regulation/sources/` on every test run, so a citation cannot rot. Findings carry their references, for example `DORA Art. 9(4)(c): access limited to approved functions`.
 
 For controls that no rule can test (is the test evidence in the change ticket adequate?), `awb sample` draws an attribute sample from one population and `awb sample-size` computes the size without data. The size follows the confidence, tolerable and expected deviation rate; the items come from a seeded permutation, and the sample file records the population, the input file SHA-256, the size, the seed and every parameter, so the sample is reproducible and defensible later. ISA 530 paragraph 8 requires that every sampling unit has a chance of selection, which the permutation guarantees.
+
+### Audit workpaper (DOCX and PDF)
+
+`awb run` lists findings; what an audit team files is a workpaper that a reviewer can read without the tool. `awb workpaper` writes one run as a document whose structure follows ISA 230 *Audit Documentation* (paras. 8 and 9): cover, data basis, procedures, results, findings, samples, significant matters and sign-off. The format follows the file suffix:
+
+```bash
+uv sync --extra workpaper                                  # python-docx and reportlab (optional extra)
+uv run awb workpaper data/generated/demo --preparer "A. Auditor"          # DATA_DIR/workpaper.docx
+uv run awb sample data/generated/demo --population changes --output s_changes.csv
+uv run awb workpaper data/generated/demo --output demo.pdf --sample s_changes.csv --min-severity medium
+```
+
+Every number comes from the run. The document model is built once and rendered twice, so DOCX (real Word headings and tables, to complete in Word) and PDF (A4, page numbers, the data hash of the run in the footer of every page) carry the same text. `--sample` attaches files written by `awb sample` as section 6; a sample drawn from different data than the folder (its population hash does not match) is rejected with exit code 1. `SOURCE_DATE_EPOCH` fixes the run date, so the same data gives the same text. Without the extra, `awb workpaper` stops with a message naming it and all other commands keep working.
+
+What needs an auditor's judgment stays visibly open: the conclusions of section 7 (one row per CRITICAL and HIGH finding), the result column of each sample and the reviewer fields of section 8 are empty, and the cover says so. The tool never writes a reviewer or a conclusion. Excerpt of the workpaper for seed 7 (`awb workpaper data/generated/demo --preparer "A. Auditor"` with `SOURCE_DATE_EPOCH=1793577600`), with 2 of its 19 input files and 3 of its 27 rules:
+
+**2. Data basis** (the findings rest on exactly these bytes)
+
+| File | Rows | Columns | SHA-256 |
+|---|---|---|---|
+| account_roles.csv | 881 | 4 | 0697f1b77fe319dd0316446e720875143c0908baca3d540207392eb37f3a896a |
+| accounts.csv | 852 | 8 | 885bdb466c60b37e4b8c557734f337da62047da0001c9fc3b32724b1f009f583 |
+
+**4. Results** (rules without findings are listed too: "tested, no exception" is a result)
+
+| Rule | Title | Low | Medium | High | Critical | Total | Result |
+|---|---|---|---|---|---|---|---|
+| A-01 | Account active after employee exit | 0 | 0 | 12 | 0 | 12 | 12 exceptions |
+| A-02 | Dormant interactive account | 0 | 10 | 0 | 0 | 10 | 10 exceptions |
+| A-03 | Generic account with interactive login | 0 | 3 | 0 | 0 | 3 | 3 exceptions |
+| Total |  | 10 | 41 | 73 | 7 | 131 |  |
+
+**8. Sign-off**
+
+| Item | Value |
+|---|---|
+| Prepared by | A. Auditor |
+| Date of the run (work completed) | 2026-11-02 |
+| Reviewed by |  |
+| Date of review |  |
+| Extent of review |  |
 
 ### The synthetic bank (all modules)
 
@@ -182,12 +227,12 @@ The posting right is not in the assigned role itself. It comes from `R-GL-CLERK`
 | B | Journal entry testing | done |
 | C | Change management | done |
 | D | Cross-module findings, sampling, DORA mapping | done |
-| E | Audit workpaper (DOCX/PDF), API, dashboard | planned |
+| E | Audit workpaper (DOCX/PDF), dashboard, API and Docker | workpaper done, dashboard planned, API and Docker later |
 
 ## Development
 
 ```bash
-uv sync
+uv sync --all-extras   # includes the optional workpaper extra the tests need
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
