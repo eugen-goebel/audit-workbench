@@ -3,7 +3,7 @@
 Design spec for phase 4. Code, generator changes and tests are built against
 this document. If code and spec disagree, the spec is fixed first.
 
-Status: approved 2026-11-01.
+Status: approved 2026-11-01, implemented on branch `feat/crosslink` (sections 1 to 7; sections 8 and 10 record what is deliberately left out).
 
 ## 0. Why
 
@@ -187,7 +187,10 @@ and whether it stays at or below `tolerable_rate` (ISA 530 para. 15).
   may be reused with attribution (Commission Decision 2011/833/EU).
 - Tests: every registered rule has an entry (or an explicit empty list with a
   reason); every quote is a substring of its source file after whitespace
-  normalisation; every `url` is the ELI link of the act.
+  normalisation; every `url` points at the official text of the act: the ELI
+  link (`https://data.europa.eu/eli/...`) for DORA and the RTS, the publisher's
+  own page for ISA 240 (IAASB) and the GoBD (BMF) — neither is an EU act, so
+  neither has an ELI link.
 - `Finding.regulation_refs` is filled from the mapping at run time, as
   `"DORA Art. 9(4)(c)"`, `"RTS 2024/1774 Art. 21(b)"`.
 - Draft mapping, all provisions read in the EUR-Lex full text on 2026-11-01
@@ -207,7 +210,7 @@ and whether it stays at or below `tolerable_rate` (ISA 530 para. 15).
 | X-01 | RTS Art. 21(b) | as A-05 |
 | X-02 | DORA Art. 9(4)(c), RTS Art. 21(d) | "limit the ... logical access ... to what is required for legitimate and approved functions and activities only" |
 | X-03 | RTS Art. 21(e)(iii), 21(c) | "users are identifiable for the actions performed in the ICT systems at all times" |
-| B-01 to B-10 | ISA 240 (Revised) paras. 48 and 49, GoBD Rz. 40 (B-06) | quotes added only after reading the original texts in the build step (D2) |
+| B-01 to B-10 | ISA 240 (Revised) paras. 48 and 49, GoBD Rz. 40 (B-06) | read in the originals first and kept under `regulation/sources/` (D2) |
 
   DORA Art. 9(4)(c) is the umbrella for all A rules and is listed for each.
 - The RTS Art. 21 subparagraph "For the purposes of point (e)(i) ... retention
@@ -280,7 +283,9 @@ Injected counts (default seed): X-01 2, X-02 4, X-03 2, total 8.
 - `awb sample DIR --population NAME --confidence 0.95 --tolerable 0.05
   --expected 0.01 --seed N [--method hypergeometric] [--replacements 5]
   [--output FILE]`, and `awb sample-size` with the same parameters without a
-  directory.
+  directory. Both take the period as `--as-of`/`--period-start`/`--period-end`
+  (defaults: 2026-09-30, the ledger year) so a reviewer can name the population
+  exactly; the selection is seeded and reproducible.
 - `awb check-ground-truth` adds module X to the table. CI job `ground-truth`
   unchanged on seeds 7 and 11.
 
@@ -318,5 +323,8 @@ Subagents one after another, not in parallel. The spec is binding for them.
 - **D1** No `PROD_DEPLOY` right in phase 4; X-02 covers journal entries only.
 - **D2** Module B is mapped to ISA 240 (Revised) and GoBD Rz. 40, read in the
   original before the quotes go in.
+  ISA 240 (Revised) is effective for periods beginning on or after
+  15 December 2026 (para. 16); it is cited ahead of time on purpose, and the
+  README says so.
 - **D3** The six-month review of RTS Art. 21(e)(iv) is listed as a known gap,
   not built.

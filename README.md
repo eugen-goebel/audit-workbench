@@ -45,7 +45,7 @@ Eight rules, specified in [docs/design/module-a-access.md](docs/design/module-a-
 
 ## Module B: journal entry testing
 
-Ten rules on the general ledger, specified in [docs/design/module-b-journal.md](docs/design/module-b-journal.md). The population follows ISA 240 (Revised) paragraphs 48 and 49: completeness of the journal entries, entries at period end and entries throughout the period.
+Ten rules on the general ledger, specified in [docs/design/module-b-journal.md](docs/design/module-b-journal.md). The population follows ISA 240 (Revised) paragraphs 48 and 49: completeness of the journal entries, entries at period end and entries throughout the period. The revised standard applies to audits of periods beginning on or after 15 December 2026 (para. 16), so for the synthetic 2025 ledger it is ahead of time; it is cited because the workbench targets the audits that come next, and the journal entry procedures of the previous ISA 240 cover the same ground under other paragraph numbers.
 
 | Rule | What it finds |
 |---|---|
@@ -78,6 +78,26 @@ Six rules on change tickets, approvals, commits and production deployments, spec
 | C-06 | Medium or high risk change deployed without a test sign-off, with a late one, or tested by its own developer |
 
 Who built a change comes from the commit authors, not from a field in the ticket. A pipeline deployment runs under a technical account, so the rules look at the person who released it. As in modules A and B, people are compared as employees, not as accounts.
+
+## Module X: cross-module cases
+
+Module A reports a segregation-of-duties conflict as a *risk*: the employee could post and approve. Module X asks whether the risk was *used*. Three rules join the access, journal and change data, specified in [docs/design/phase-4-crosslink.md](docs/design/phase-4-crosslink.md).
+
+| Rule | What it finds |
+|---|---|
+| X-01 | An employee holds two conflicting functions and prepared and approved the same manual journal entry |
+| X-02 | An action in the journal or change data that no right of the acting account covers on that day |
+| X-03 | Activity after the exit date: commits, deployments or journal entries by a leaver after their last working day |
+
+Every rule asks what was held **when the action happened**, not on the audit date. An account holds a function at day *d* when it exists at *d* and has an assignment valid at *d* to a role that contains the function, directly or through the role hierarchy. So a right granted in July does not cover a March action, and a right withdrawn in April does not stop an August action from being flagged.
+
+The bank plants 8 cross-module cases (X-01 2, X-02 4, X-03 2) and near misses that must not be flagged: a right granted after the ledger year, an approver acting on their own change but not on a journal entry, and an action on the exit date itself.
+
+### Regulation mapping and sampling
+
+Two smaller parts complete the workflow. `regulation/mapping.yaml` maps every rule id to the provision it tests, with a verbatim quote and the official URL; the quote is checked against the stored text in `regulation/sources/` on every test run, so a citation cannot rot. Findings carry their references, for example `DORA Art. 9(4)(c): access limited to approved functions`.
+
+For controls that no rule can test (is the test evidence in the change ticket adequate?), `awb sample` draws an attribute sample from one population and `awb sample-size` computes the size without data. The size follows the confidence, tolerable and expected deviation rate; the items come from a seeded permutation, and the sample file records the population, the input file SHA-256, the size, the seed and every parameter, so the sample is reproducible and defensible later. ISA 530 paragraph 8 requires that every sampling unit has a chance of selection, which the permutation guarantees.
 
 ### The synthetic bank (all modules)
 
@@ -115,10 +135,14 @@ Output of `awb check-ground-truth` on the default seed. CI runs the same check o
 | C | C-04 | Approval came after the deployment | 4 | 4 | 4 | 100.0% | 100.0% |
 | C | C-05 | Approver is not independent of the change | 4 | 4 | 4 | 100.0% | 100.0% |
 | C | C-06 | Change deployed without test sign-off | 3 | 3 | 3 | 100.0% | 100.0% |
+| X | X-01 | Conflicting functions held and used on one transaction | 2 | 2 | 2 | 100.0% | 100.0% |
+| X | X-02 | Action not covered by the access data | 4 | 4 | 4 | 100.0% | 100.0% |
+| X | X-03 | Activity after the exit date | 2 | 2 | 2 | 100.0% | 100.0% |
 | A | **Total A** |  | 55 | 55 | 55 | 100.0% | 100.0% |
 | B | **Total B** |  | 42 | 42 | 42 | 100.0% | 100.0% |
 | C | **Total C** |  | 26 | 26 | 26 | 100.0% | 100.0% |
-|  | **Total** |  | 123 | 123 | 123 | 100.0% | 100.0% |
+| X | **Total X** |  | 8 | 8 | 8 | 100.0% | 100.0% |
+|  | **Total** |  | 131 | 131 | 131 | 100.0% | 100.0% |
 
 This shows the rules match their specification on data built to that specification. It says nothing about real-world data quality, which is always messier.
 
@@ -157,7 +181,7 @@ The posting right is not in the assigned role itself. It comes from `R-GL-CLERK`
 | A | Access review and segregation of duties | done |
 | B | Journal entry testing | done |
 | C | Change management | done |
-| D | Cross-module findings, sampling, DORA mapping | planned |
+| D | Cross-module findings, sampling, DORA mapping | done |
 | E | Audit workpaper (DOCX/PDF), API, dashboard | planned |
 
 ## Development
@@ -170,13 +194,17 @@ uv run ruff check . && uv run ruff format --check .
 
 ## Auf Deutsch
 
-IT-Prüfungshandlungen für Banken, datenbasiert umgesetzt. Vier Bereiche werden abgedeckt: Berechtigungsprüfung, Funktionstrennung, Journal-Entry-Testing und Change-Management. Getestet wird an einer synthetischen Bank, deren Fehler bekannt sind und absichtlich eingebaut wurden. Dadurch lässt sich jede Prüfregel gegen ein bekanntes Ergebnis prüfen.
+IT-Prüfungshandlungen für Banken, datenbasiert umgesetzt. Fünf Bereiche werden abgedeckt: Berechtigungsprüfung, Funktionstrennung, Journal-Entry-Testing, Change-Management und modulübergreifende Fälle. Getestet wird an einer synthetischen Bank, deren Fehler bekannt sind und absichtlich eingebaut wurden. Dadurch lässt sich jede Prüfregel gegen ein bekanntes Ergebnis prüfen.
 
 Modul A ist die Berechtigungsprüfung und arbeitet mit acht Regeln. Es findet aktive Konten ausgeschiedener Mitarbeiter, Privilegien ohne Rezertifizierung und Verstöße gegen die Funktionstrennung. Auch Verstöße, die erst über mehrere Ebenen vererbter Rollen entstehen, erkennt das Modul. Zu jedem Fund zeigt das Werkzeug den Weg vom Konto bis zur einzelnen Berechtigung.
 
 Modul B übernimmt das Journal-Entry-Testing. Hier laufen zehn Regeln, darunter Benford-Analysen, Buchungen am Periodenende, Lücken in den Belegnummern, Dubletten und fehlende Vier-Augen-Freigabe.
 
 Modul C prüft das Change-Management nach DORA Art. 9 Abs. 4 Buchst. e und Art. 17 der Delegierten Verordnung (EU) 2024/1774. Dafür stehen sechs Regeln. Das Modul findet Deployments ohne genehmigten Change und Entwickler, die ihre eigene Änderung in die Produktion bringen. Außerdem erkennt es Notfalländerungen ohne nachträgliche Freigabe, Freigaben nach dem Deployment, Genehmiger, die den Change selbst beantragt oder programmiert haben, und Änderungen ohne Testabnahme. Wer eine Änderung gebaut hat, ergibt sich aus den Commits, nicht aus einem Feld im Ticket.
+
+Modul X verbindet die drei Datenbestände. Es fragt, ob ein Risiko tatsächlich genutzt wurde: Hat ein Mitarbeiter mit zwei unvereinbaren Funktionen dieselbe Buchung erfasst und freigegeben? Hat ein Konto gehandelt, ohne an diesem Tag das Recht dazu zu haben? War ein ausgeschiedener Mitarbeiter nach seinem letzten Arbeitstag noch aktiv? Maßgeblich ist immer der Tag der Handlung, nicht der Prüfungsstichtag.
+
+Zu jedem Fund nennt das Werkzeug die einschlägige Vorschrift mit wörtlichem Zitat und amtlicher Fundstelle, zum Beispiel DORA Art. 9 Abs. 4 Buchst. c. Die Zitate liegen als Text in `regulation/sources/` und werden bei jedem Testlauf gegen das Zitat in der Zuordnung geprüft. Für Kontrollen, die keine Regel prüfen kann (etwa ob der Nachweis im Change-Ticket ausreicht), zieht `awb sample` eine Stichprobe aus einer Population; `awb sample-size` berechnet den Stichprobenumfang auch ohne Daten. Die Stichprobendatei hält Population, Prüfsumme der Eingabedatei, Umfang, Seed und alle Parameter fest und ist damit reproduzierbar.
 
 Alle Daten sind künstlich erzeugt. Echte Daten kommen nicht vor. Die Prüfregeln beruhen nur auf öffentlichen Quellen, nicht auf der Methodik einer Prüfungsgesellschaft.
 
