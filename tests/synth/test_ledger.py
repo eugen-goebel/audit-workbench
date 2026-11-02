@@ -58,7 +58,7 @@ MODULE_A_FILES = [
 #: clerk and the last_login of the two developer leavers. The other files are unchanged.
 MODULE_A_HASHES = {
     7: {
-        "account_roles.csv": "353e9dcd8f765c4eb10deae9fded6926852bb47fae0c9e45fa8a676576d14a8a",
+        "account_roles.csv": "3787bda37e00b863e1bb033bc8a473a0ba537684d7e0ebcee831a42a4fa0ec0d",
         "accounts.csv": "235a67e77645db57e8eff1a623534d0d7ba62c9c225da4e3b90b486669b07058",
         "entitlements.csv": "044dcc17d56e5f54625bc7344074ff050d08a38de691799de12b68852d9f1240",
         "hr_employees.csv": "e7fc77c235f48bc066b6c064c141740f484b1212e41764e3a5ddf41ad2454767",
@@ -69,7 +69,7 @@ MODULE_A_HASHES = {
         "roles.csv": "bfeffd47bba75d526af3a1aec197cf9c8e4d15340dff227713a64914629d29af",
     },
     11: {
-        "account_roles.csv": "bcefaf1b293ae84a8c2811fa2c4ff24a3a119b1893dc6cf10e2ae8d2b455eab6",
+        "account_roles.csv": "a1db584e8dd1dde88939913211b38cbcd50b76656202282d176f9ea5df2134ca",
         "accounts.csv": "eeed4815a97a5d259608b2d82b240f9659c8687ff466757744c2335711aa6a2e",
         "entitlements.csv": "044dcc17d56e5f54625bc7344074ff050d08a38de691799de12b68852d9f1240",
         "hr_employees.csv": "a3ca91017e8dd13a2ee567e268ba6d7f8b5facb333c40bdbecd1103f8135219f",
