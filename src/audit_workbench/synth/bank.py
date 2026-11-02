@@ -426,7 +426,7 @@ class Bank:
             int(self.rng.integers(0, 60)),
         )
 
-    def assign(self, account_id: str, role_id: str, *, valid_from: str = "2020-01-01") -> None:
+    def assign(self, account_id: str, role_id: str, *, valid_from: str) -> None:
         self.assignments.setdefault(account_id, []).append(role_id)
         self.rows["account_roles"].append(
             {
@@ -593,7 +593,9 @@ def _add_shared_accounts(bank: Bank) -> None:
                 created_at=_ts(date(2024, 6, 1), 8, 0),
                 last_login="" if never else _ts(bank.as_of - timedelta(days=5), 3, 0),
             )
-            bank.assign(bank.rows["accounts"][-1]["account_id"], _view_role(system))
+            bank.assign(
+                bank.rows["accounts"][-1]["account_id"], _view_role(system), valid_from="2024-06-01"
+            )
         bank.add_account(
             system,
             account_type="generic",
@@ -601,7 +603,9 @@ def _add_shared_accounts(bank: Bank) -> None:
             created_at=_ts(date(2023, 3, 1), 8, 0),
             last_login="",
         )
-        bank.assign(bank.rows["accounts"][-1]["account_id"], _view_role(system))
+        bank.assign(
+            bank.rows["accounts"][-1]["account_id"], _view_role(system), valid_from="2023-03-01"
+        )
 
 
 def _view_role(system: str) -> str:
@@ -651,13 +655,19 @@ def _add_near_misses(bank: Bank) -> None:
     duo_emp = bank.groups[("Zahlungsverkehr", "Sonderaufgaben")][0]
     bank.used_employees.add(duo_emp)
     duo_acct = _account_of(bank, duo_emp)
-    bank.assign(duo_acct, "R-PAY-CLERK")
-    bank.assign(duo_acct, "R-PAY-BENE")
+    # Granted on the entry date like every regular role, never before it.
+    duo_from = _entry_date(bank, duo_emp)
+    bank.assign(duo_acct, "R-PAY-CLERK", valid_from=duo_from)
+    bank.assign(duo_acct, "R-PAY-BENE", valid_from=duo_from)
 
     # 9: a role that would be rare, but the peer group has fewer than 5 members.
     rare_emp = bank.groups[("Handel", "Sonderaufgaben")][1]
     bank.used_employees.add(rare_emp)
-    bank.assign(_account_of(bank, rare_emp), "R-TRD-TRADER")
+    bank.assign(_account_of(bank, rare_emp), "R-TRD-TRADER", valid_from=_entry_date(bank, rare_emp))
+
+
+def _entry_date(bank: Bank, emp_id: str) -> str:
+    return next(r for r in bank.rows["hr_employees"] if r["employee_id"] == emp_id)["entry_date"]
 
 
 def _account_of(bank: Bank, emp_id: str) -> str:
