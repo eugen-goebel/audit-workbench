@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -158,8 +159,11 @@ def test_without_the_extra_the_command_names_it(
 
 
 def test_the_help_lists_the_command_and_its_options() -> None:
+    # On GitHub Actions rich colours the help even without a terminal, and the
+    # escape codes split option names ("-" + code + "-output"); strip them.
     result = runner.invoke(app, ["workpaper", "--help"])
     assert result.exit_code == 0
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     for option in (
         "--output",
         "--as-of",
@@ -169,4 +173,4 @@ def test_the_help_lists_the_command_and_its_options() -> None:
         "--preparer",
         "--title",
     ):
-        assert option in result.output
+        assert option in plain
