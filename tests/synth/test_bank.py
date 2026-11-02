@@ -226,3 +226,34 @@ def test_generation_and_rules_are_fast(tmp_path: Path) -> None:
     truth = json.loads((directory / "ground_truth.json").read_text())
     got = {(f.rule_id, f.entity) for f in findings}
     assert got == a_issues(truth)
+
+
+def _early_roles(directory: Path) -> list[tuple[str, str, str, str]]:
+    """Role assignments that start before the owner joined.
+
+    Accounts without an HR owner (technical, generic, A-07 orphans) are checked
+    against their creation date instead.
+    """
+    import csv
+
+    hr = {r["employee_id"]: r for r in csv.DictReader(open(directory / "hr_employees.csv"))}
+    accounts = {r["account_id"]: r for r in csv.DictReader(open(directory / "accounts.csv"))}
+    early = []
+    for row in csv.DictReader(open(directory / "account_roles.csv")):
+        account = accounts[row["account_id"]]
+        if account["employee_id"] in hr:
+            bounds = [hr[account["employee_id"]]["entry_date"]]
+        else:
+            bounds = [account["created_at"][:10]] if account["created_at"] else []
+        for bound in bounds:
+            if row["valid_from"] < bound:
+                early.append((row["account_id"], row["role_id"], row["valid_from"], bound))
+    return early
+
+
+@pytest.mark.parametrize("seed", [2, 7, 11])
+@pytest.mark.parametrize("inject", [True, False])
+def test_no_role_starts_before_account_or_entry(tmp_path: Path, seed: int, inject: bool) -> None:
+    """A reviewer would ask how someone held a role before joining; the data must not invite it."""
+    directory = generate_bank(tmp_path / "bank", seed=seed, inject=inject)
+    assert _early_roles(directory) == []
