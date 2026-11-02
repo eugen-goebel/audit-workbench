@@ -1,0 +1,10 @@
+GoBD (BMF-Schreiben vom 28.11.2019, BStBl I S. 1269, amended 14.07.2025), extract: Rz. 40
+Source: https://amtliche-handbuecher.bundesfinanzministerium.de/ao/2025/Anhaenge/BMF-Schreiben-und-gleichlautende-Laendererlasse/Anhang-33/anhang-33.html
+Retrieved: 2026-11-01
+Licence: amtliches Werk, Section 5 UrhG (gemeinfrei)
+
+40 Die vollständige und lückenlose Erfassung und Wiedergabe aller Geschäftsvorfälle ist bei
+DV-Systemen durch ein Zusammenspiel von technischen (einschließlich programmierten) und
+organisatorischen Kontrollen sicherzustellen (z. B. Erfassungskontrollen, Plausibilitätskontrollen
+bei Dateneingaben, inhaltliche Plausibilitätskontrollen, automatisierte Vergabe von
+Datensatznummern, Lückenanalyse oder Mehrfachbelegungsanalyse bei Belegnummern).

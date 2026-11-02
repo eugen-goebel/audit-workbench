@@ -1,0 +1,82 @@
+Commission Delegated Regulation (EU) 2024/1774, extracts: Article 17(1), 20 and 21
+Source: https://data.europa.eu/eli/reg_del/2024/1774/oj
+Retrieved: 2026-11-01
+Licence: reused with attribution, Commission Decision 2011/833/EU
+
+1. As part of the safeguards to preserve the availability, authenticity, integrity, and
+confidentiality of data, financial entities shall include in the ICT change management procedures
+referred to in Article 9(4), point (e), of Regulation (EU) 2022/2554, in respect of all changes to
+software, hardware, firmware components, systems, or security parameters, all of the following
+elements: (a) a verification of whether the ICT security requirements have been met; (b) mechanisms
+to ensure the independence of the functions that approve changes and the functions responsible for
+requesting and implementing those changes; (c) a clear description of the roles and responsibilities
+to ensure that: (i) changes are specified and planned; (ii) an adequate transition is designed;
+(iii) the changes are tested and finalised in a controlled manner; (iv) there is an effective
+quality assurance; (d) the documentation and communication of change details, including: (i) the
+purpose and scope of the change; (ii) the timeline for the implementation of the change; (iii) the
+expected outcomes; (e) the identification of fall-back procedures and responsibilities, including
+procedures and responsibilities for aborting changes or recovering from changes not successfully
+implemented; (f) procedures, protocols, and tools to manage emergency changes that provide adequate
+safeguards; (g) procedures to document, re-evaluate, assess, and approve emergency changes after
+their implementation, including workarounds and patches; (h) the identification of the potential
+impact of a change on existing ICT security measures and an assessment of whether such change
+requires the adoption of additional ICT security measures.
+
+Article 20 Identity management 1. As part of their control of access management rights, financial
+entities shall develop, document, and implement identity management policies and procedures that
+ensure the unique identification and authentication of natural persons and systems accessing the
+financial entities' information to enable assignment of user access rights in accordance with
+Article 21. 2. The identity management policies and procedures referred to in paragraph 1 shall
+contain all of the following: (a) without prejudice to Article 21, first paragraph, point (c), a
+unique identity corresponding to a unique user account shall be assigned to each staff member of the
+financial entity or staff of the ICT third-party service providers accessing the information assets
+and ICT assets of the financial entity; (b) a lifecycle management process for identities and
+accounts managing the creation, change, review and update, temporary deactivation, and termination
+of all accounts. For the purposes of point (a), financial entities shall maintain records of all
+identity assignments. Those records shall be kept following a reorganisation of the financial entity
+or after the end of the contractual relationship without prejudice to the retention requirements
+laid down in applicable Union and national law. For the purposes of point (b), financial entities
+shall, where feasible and appropriate, deploy automated solutions for the lifecycle identity
+management process.
+
+Article 21 Access control As part of their control of access management rights, financial entities
+shall develop, document, and implement a policy that contains all of the following: (a) the
+assignment of access rights to ICT assets based on need-to-know, need-to-use and least privilege
+principles, including for remote and emergency access; (b) the segregation of duties designed to
+prevent unjustified access to critical data or to prevent the allocation of combinations of access
+rights that may be used to circumvent controls; (c) a provision on user accountability, by limiting
+to the extent possible the use of generic and shared user accounts and ensuring that users are
+identifiable for the actions performed in the ICT systems at all times; (d) a provision on
+restrictions of access to ICT assets, setting out controls and tools to prevent unauthorised access;
+(e) account management procedures to grant, change or revoke access rights for user and generic
+accounts, including generic administrator accounts, including provision on all of the following: (i)
+assignment of roles and responsibilities for granting, reviewing, and revoking access rights; (ii)
+assignment of privileged, emergency, and administrator access on a need-to-use or an ad-hoc basis
+for all ICT systems; (iii) withdrawal of access rights without undue delay upon termination of the
+employment or when the access is no longer necessary; (iv) update of access rights where changes are
+necessary and at least once a year for all ICT systems, other than ICT systems supporting critical
+or important functions and at least every 6 months for ICT systems supporting critical or important
+functions; (f) authentication methods, including all of the following: (i) the use of authentication
+methods commensurate to the classification established in accordance with Article 8(1) of Regulation
+(EU) 2022/2554 and to the overall risk profile of ICT assets and considering leading practices; (ii)
+the use of strong authentication methods in accordance with leading practices and techniques for
+remote access to the financial entity's network, for privileged access, for access to ICT assets
+supporting critical or important functions or ICT assets that are publicly accessible; (g) physical
+access controls measures including: (i) the identification and logging of natural persons that are
+authorised to access premises, data centres, and sensitive designated areas identified by the
+financial entity where ICT and information assets reside; (ii) the granting of physical access
+rights to critical ICT assets to authorised persons only, in accordance with the need-to-know and
+least privilege principles, and on an ad-hoc basis; (iii) the monitoring of physical access to
+premises, data centres, and sensitive designated areas identified by the financial entity where ICT
+and information assets or both reside; (iv) the review of physical access rights to ensure that
+unnecessary access rights are promptly revoked. For the purposes of point (e)(i), financial entities
+shall establish the retention period taking into account the business and information security
+objectives, the reasons for recording the event in the logs, and the results of the ICT risk
+assessment. For the purposes of point (e)(ii), financial entities shall, where possible, use
+dedicated accounts for the performance of administrative tasks on ICT systems. Where feasible and
+appropriate, financial entities shall deploy automated solutions for the privilege access
+management. For the purposes of point (g)(i), the identification and logging shall be commensurate
+with the importance of the premises, data centres, sensitive designated areas, and the criticality
+of the operations or ICT systems located therein. For the purposes of point (g)(iii), the monitoring
+shall be commensurate to the classification established in accordance with Article 8(1) of
+Regulation (EU) 2022/2554 and the criticality of the area accessed.

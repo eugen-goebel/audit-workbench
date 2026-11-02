@@ -1,0 +1,24 @@
+ISA 240 (Revised) (IAASB, July 2025), extracts: paragraphs 48 and 49
+Source: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+Retrieved: 2026-11-01
+Licence: copyright IFAC; short excerpts quoted for non-commercial research and citation with attribution
+
+48. The auditor shall design and perform audit procedures to test the appropriateness of journal
+entries recorded in the general ledger and other adjustments made in the preparation of the
+financial statements. (Ref: Para. A136–A139)
+
+49. In designing and performing audit procedures in accordance with paragraph 48, the auditor shall:
+(Ref: Para. A99)
+
+(a) Make inquiries of individuals involved in the financial reporting process about their knowledge
+of inappropriate or unusual activity relating to the processing of journal entries and other
+adjustments;
+
+(b) Obtain audit evidence about the completeness of the population of journal entries and other
+adjustments made throughout the period; (Ref: Para. A140 and A147)
+
+(c) Select journal entries and other adjustments made at the end of a reporting period; and (Ref:
+Para. A141–A143, A144 and A146–A147)
+
+(d) Determine the need to test journal entries and other adjustments made throughout the period.
+(Ref: Para. A142–A143 and A145–A146)

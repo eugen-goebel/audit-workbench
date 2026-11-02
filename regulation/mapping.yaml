@@ -1,0 +1,298 @@
+# Rule -> regulation references.
+# Keys are rule ids. Each entry gives the framework, the article or paragraph with a
+# one-line gloss, a verbatim quote from regulation/sources/ and the official URL.
+# tests/regulation/test_mapping.py checks that every quote is a substring of its
+# source file and that every registered rule has an entry.
+A-01:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: withdrawal of access rights without undue delay upon termination of the employment or when the
+    access is no longer necessary
+  ref: 'Art. 21(e)(iii): access withdrawn without undue delay'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-02:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: withdrawal of access rights without undue delay upon termination of the employment or when the
+    access is no longer necessary
+  ref: 'Art. 21(e)(iii): access withdrawn without undue delay'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: a lifecycle management process for identities and accounts managing the creation, change, review
+    and update, temporary deactivation, and termination of all accounts
+  ref: 'Art. 20(2)(b): identity lifecycle management'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-03:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: a provision on user accountability, by limiting to the extent possible the use of generic and
+    shared user accounts and ensuring that users are identifiable for the actions performed in the ICT
+    systems at all times
+  ref: 'Art. 21(c): user accountability, named accounts'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-04:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: assignment of privileged, emergency, and administrator access on a need-to-use or an ad-hoc basis
+    for all ICT systems
+  ref: 'Art. 21(e)(ii): privileged access on need-to-use'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: update of access rights where changes are necessary and at least once a year for all ICT systems
+  ref: 'Art. 21(e)(iv): access reviewed at least yearly'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-05:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: the segregation of duties designed to prevent unjustified access to critical data or to prevent
+    the allocation of combinations of access rights that may be used to circumvent controls
+  ref: 'Art. 21(b): segregation of duties'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-06:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: assignment of roles and responsibilities for granting, reviewing, and revoking access rights
+  ref: 'Art. 21(e)(i): roles for grant, review and revocation'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: update of access rights where changes are necessary and at least once a year for all ICT systems
+  ref: 'Art. 21(e)(iv): access reviewed at least yearly'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-07:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: ensure the unique identification and authentication of natural persons and systems accessing
+    the financial entities' information
+  ref: 'Art. 20(1): unique identification and authentication'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: a unique identity corresponding to a unique user account shall be assigned to each staff member
+  ref: 'Art. 20(2)(a): one identity per person'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+A-08:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: the assignment of access rights to ICT assets based on need-to-know, need-to-use and least privilege
+    principles
+  ref: 'Art. 21(a): need-to-know and least privilege'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+B-01:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-02:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-03:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-04:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-05:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Select journal entries and other adjustments made at the end of a reporting period
+  ref: 'para. 49(c): entries at the end of a reporting period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-06:
+- framework: ISA 240 (Revised)
+  quote: Obtain audit evidence about the completeness of the population of journal entries and other adjustments
+    made throughout the period
+  ref: 'para. 49(b): completeness of the population'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: GoBD (BMF 28.11.2019)
+  quote: Die vollständige und lückenlose Erfassung und Wiedergabe aller Geschäftsvorfälle ist bei DV-Systemen
+    durch ein Zusammenspiel von technischen (einschließlich programmierten) und organisatorischen Kontrollen
+    sicherzustellen
+  ref: 'Rz. 40: complete recording'
+  url: https://amtliche-handbuecher.bundesfinanzministerium.de/ao/2025/Anhaenge/BMF-Schreiben-und-gleichlautende-Laendererlasse/Anhang-33/anhang-33.html
+B-07:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-08:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-09:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+B-10:
+- framework: ISA 240 (Revised)
+  quote: The auditor shall design and perform audit procedures to test the appropriateness of journal
+    entries recorded in the general ledger and other adjustments made in the preparation of the financial
+    statements
+  ref: 'para. 48: journal entries tested for appropriateness'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+- framework: ISA 240 (Revised)
+  quote: Determine the need to test journal entries and other adjustments made throughout the period
+  ref: 'para. 49(d): entries throughout the period'
+  url: https://www.iaasb.org/publications/isa-240-revised-auditor-s-responsibilities-relating-fraud-audit-financial-statements
+C-01:
+- framework: DORA
+  quote: implement documented policies, procedures and controls for ICT change management, including changes
+    to software, hardware, firmware components, systems or security parameters
+  ref: 'Art. 9(4)(e): changes recorded, tested, approved'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: financial entities shall include in the ICT change management procedures referred to in Article
+    9(4), point (e), of Regulation (EU) 2022/2554
+  ref: 'Art. 17(1): ICT change management procedures'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+C-02:
+- framework: RTS 2024/1774
+  quote: mechanisms to ensure the independence of the functions that approve changes and the functions
+    responsible for requesting and implementing those changes
+  ref: 'Art. 17(1)(b): independence of approval from request and implementation'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+C-03:
+- framework: RTS 2024/1774
+  quote: procedures, protocols, and tools to manage emergency changes that provide adequate safeguards
+  ref: 'Art. 17(1)(f): emergency changes with adequate safeguards'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: procedures to document, re-evaluate, assess, and approve emergency changes after their implementation
+  ref: 'Art. 17(1)(g): emergency changes approved after implementation'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+C-04:
+- framework: DORA
+  quote: implement documented policies, procedures and controls for ICT change management, including changes
+    to software, hardware, firmware components, systems or security parameters
+  ref: 'Art. 9(4)(e): changes recorded, tested, approved'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: financial entities shall include in the ICT change management procedures referred to in Article
+    9(4), point (e), of Regulation (EU) 2022/2554
+  ref: 'Art. 17(1): ICT change management procedures'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+C-05:
+- framework: RTS 2024/1774
+  quote: mechanisms to ensure the independence of the functions that approve changes and the functions
+    responsible for requesting and implementing those changes
+  ref: 'Art. 17(1)(b): independence of approval from request and implementation'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+C-06:
+- framework: RTS 2024/1774
+  quote: the changes are tested and finalised in a controlled manner
+  ref: 'Art. 17(1)(c)(iii): changes tested and finalised in a controlled manner'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+X-01:
+- framework: RTS 2024/1774
+  quote: the segregation of duties designed to prevent unjustified access to critical data or to prevent
+    the allocation of combinations of access rights that may be used to circumvent controls
+  ref: 'Art. 21(b): segregation of duties'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+X-02:
+- framework: DORA
+  quote: implement policies that limit the physical or logical access to information assets and ICT assets
+    to what is required for legitimate and approved functions and activities only
+  ref: 'Art. 9(4)(c): access limited to approved functions'
+  url: https://data.europa.eu/eli/reg/2022/2554/oj
+- framework: RTS 2024/1774
+  quote: a provision on restrictions of access to ICT assets, setting out controls and tools to prevent
+    unauthorised access
+  ref: 'Art. 21(d): restrictions on access'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+X-03:
+- framework: RTS 2024/1774
+  quote: withdrawal of access rights without undue delay upon termination of the employment or when the
+    access is no longer necessary
+  ref: 'Art. 21(e)(iii): access withdrawn without undue delay'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
+- framework: RTS 2024/1774
+  quote: a provision on user accountability, by limiting to the extent possible the use of generic and
+    shared user accounts and ensuring that users are identifiable for the actions performed in the ICT
+    systems at all times
+  ref: 'Art. 21(c): user accountability, named accounts'
+  url: https://data.europa.eu/eli/reg_del/2024/1774/oj
