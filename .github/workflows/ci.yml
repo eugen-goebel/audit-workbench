@@ -44,7 +44,7 @@ jobs:
         run: uv sync --locked --all-extras
 
       - name: Run tests with coverage
-        run: uv run pytest -v --cov=audit_workbench --cov-report=term-missing --cov-report=xml --cov-fail-under=90
+        run: uv run pytest -v -m "not dashboard_app" --cov=audit_workbench --cov-report=term-missing --cov-report=xml --cov-fail-under=90
 
       - name: Coverage summary
         if: always() && matrix.python-version == '3.12'
@@ -76,3 +76,21 @@ jobs:
             uv run awb check-ground-truth "data/generated/s$SEED" | tee -a "$GITHUB_STEP_SUMMARY" || status=1
           done
           exit "$status"
+
+  # Not a required check (spec phase-5-dashboard, section 7): the Streamlit smoke tests stay out of
+  # the `test` job (marker dashboard_app), so a flaky run of the app cannot block a merge.
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Dashboard tests (views, guard test, Streamlit app)
+        run: uv run pytest -v tests/dashboard tests/test_cli_dashboard.py
