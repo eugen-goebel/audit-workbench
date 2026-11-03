@@ -3,8 +3,8 @@
 Design spec for the second part of phase 5. Code and tests are built against
 this document. If code and spec disagree, the spec is fixed first.
 
-Status: draft 2026-11-02, waiting for approval. The API and Docker are not part
-of this spec (section 10).
+Status: approved 2026-11-02, all recommendations of section 10 taken (E1-E6).
+The API and Docker are not part of this spec (section 9).
 
 ## 0. Why
 
@@ -177,7 +177,7 @@ into `reporting.py` so the CLI and the dashboard cannot drift apart.
 - German interface: the repository is English throughout.
 - Real client data: never, in any view or screenshot.
 
-## 10. Open decisions (for approval)
+## 10. Decisions (Eugen, 2026-11-02: every recommendation below accepted)
 
 - **E1 Framework.** Streamlit as planned. Alternatives: Gradio (simpler forms,
   weaker layout), Dash (more control, more code). Recommendation: Streamlit,
