@@ -1,0 +1,8 @@
+# Dependencies of the dashboard for Streamlit Community Cloud (it installs the first dependency
+# file it finds and prefers the entrypoint's directory, so this file wins over uv.lock).
+# Pinned to the versions uv.lock resolved. Keep them in step when uv.lock changes.
+streamlit==1.66.1
+plotly==7.1.0
+# The workbench itself and its core dependencies. Editable on purpose: the package then
+# reads regulation/mapping.yaml from this checkout, so findings carry their regulation quotes.
+-e .

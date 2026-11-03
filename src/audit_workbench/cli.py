@@ -10,7 +10,8 @@ Typical audit workflow:
                              commits and deployments,
 4. `awb benford`             look at the digit distributions behind the Benford findings,
 5. `awb workpaper`           write the run as an audit workpaper (DOCX or PDF, ISA 230 layout),
-6. `awb check-ground-truth`  prove the rules find exactly the planted issues (used in CI).
+6. `awb check-ground-truth`  prove the rules find exactly the planted issues (used in CI),
+7. `awb dashboard`           browse the run in a Streamlit dashboard (optional extra).
 
 Every command is deterministic: same files and same audit date give the same findings
 and the same finding ids. Module A is the access review, module B the journal-entry
@@ -19,7 +20,11 @@ testing, module C the change management.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
+import subprocess
+import sys
 from collections import Counter
 from datetime import date, datetime
 from enum import StrEnum
@@ -32,6 +37,7 @@ from audit_workbench.access.data import AccessData, load_access_evidence
 from audit_workbench.change.data import ChangeData, load_change_evidence
 from audit_workbench.core.evidence import Evidence, EvidenceError
 from audit_workbench.core.findings import Finding, Severity
+from audit_workbench.dashboard.source import DEFAULT_SEED, InvalidSeedError, parse_seed
 from audit_workbench.journal.anomaly import rank_entries
 from audit_workbench.journal.benford import benford_groups
 from audit_workbench.journal.data import JournalData, load_journal_data
@@ -39,6 +45,9 @@ from audit_workbench.reporting import (
     ModuleName,
     all_rule_ids,
     collect_evidence,
+    compare_ground_truth,
+    findings_markdown,
+    ground_truth_report,
     module_of,
     render_details,
     rule_title,
@@ -163,20 +172,6 @@ def _short(text: str, width: int = _DESCRIPTION_WIDTH) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def _md_cell(text: str) -> str:
-    return text.replace("|", "\\|").replace("\n", " ")
-
-
-def _md_table(headers: list[str], rows: list[list[str]]) -> str:
-    lines = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
-    lines += ["| " + " | ".join(_md_cell(c) for c in row) + " |" for row in rows]
-    return "\n".join(lines)
-
-
-def _percent(numerator: int, denominator: int) -> str:
-    return "n/a" if denominator == 0 else f"{100 * numerator / denominator:.1f}%"
-
-
 # --- run: renderers ----------------------------------------------------------
 
 
@@ -251,16 +246,6 @@ def _render_rank(journal: JournalData, top: int) -> str:
 
 def _render_json(findings: list[Finding]) -> str:
     return json.dumps([f.model_dump(mode="json") for f in findings], indent=2)
-
-
-def _render_markdown(findings: list[Finding]) -> str:
-    if not findings:
-        return "No findings."
-    rows = [
-        [f.finding_id, module_of(f.rule_id), f.rule_id, f.severity.name, f.entity, f.description]
-        for f in findings
-    ]
-    return _md_table(["finding_id", "module", "rule", "severity", "entity", "description"], rows)
 
 
 # --- commands ----------------------------------------------------------------
@@ -344,7 +329,7 @@ def run(
     if output_format is OutputFormat.json:
         text = _render_json(findings)
     elif output_format is OutputFormat.markdown:
-        text = _render_markdown(findings)
+        text = findings_markdown(findings)
         if rank is not None and journal is not None:
             text += "\n\n### Anomaly ranking (selection aid, not findings)\n\n" + _render_rank(
                 journal, rank
@@ -432,71 +417,6 @@ def explain(
     typer.echo("\n".join(lines))
 
 
-def _ground_truth_report(
-    truth: dict[str, Any], found: set[tuple[str, str]], expected: set[tuple[str, str]]
-) -> str:
-    rule_ids = all_rule_ids(ModuleName.all, *(r for r, _ in expected | found))
-    rows: list[list[str]] = []
-    totals: dict[str, list[int]] = {}
-    for rule_id in rule_ids:
-        module = module_of(rule_id)
-        exp = {e for r, e in expected if r == rule_id}
-        got = {e for r, e in found if r == rule_id}
-        hits = len(exp & got)
-        t = totals.setdefault(module, [0, 0, 0])
-        t[0] += len(exp)
-        t[1] += len(got)
-        t[2] += hits
-        rows.append(
-            [module, rule_id, rule_title(rule_id), str(len(exp)), str(len(got)), str(hits)]
-            + [_percent(hits, len(exp)), _percent(hits, len(got))]
-        )
-    for module, (exp_n, got_n, hit_n) in sorted(totals.items()):
-        rows.append(
-            [module, f"**Total {module}**", "", str(exp_n), str(got_n), str(hit_n)]
-            + [_percent(hit_n, exp_n), _percent(hit_n, got_n)]
-        )
-    hits = len(expected & found)
-    rows.append(
-        ["", "**Total**", "", str(len(expected)), str(len(found)), str(hits)]
-        + [_percent(hits, len(expected)), _percent(hits, len(found))]
-    )
-    verdict = "PASS" if expected == found else "FAIL"
-    as_of_b = truth.get("journal_as_of", truth.get("as_of"))
-    as_of_c = truth.get("change_as_of", truth.get("as_of"))
-    out = [
-        "## Ground-truth check",
-        "",
-        f"- Seed: {truth.get('seed')}",
-        f"- As of module A: {truth.get('as_of')}",
-        f"- As of module B: {as_of_b}",
-        f"- As of module C: {as_of_c}",
-        f"- Result: **{verdict}**",
-        "",
-        _md_table(
-            [
-                "module",
-                "rule",
-                "title",
-                "expected",
-                "found",
-                "true positives",
-                "recall",
-                "precision",
-            ],
-            rows,
-        ),
-    ]
-    for heading, items in (
-        ("Missed (expected, not found)", expected - found),
-        ("Unexpected (found, not expected)", found - expected),
-    ):
-        if items:
-            out += ["", f"### {heading}", ""]
-            out += [f"- `{rule}` `{entity}`" for rule, entity in sorted(items)]
-    return "\n".join(out)
-
-
 @app.command("check-ground-truth")
 def check_ground_truth(data_dir: DataDir) -> None:
     """Compare the findings with the planted issues in ground_truth.json.
@@ -511,10 +431,9 @@ def check_ground_truth(data_dir: DataDir) -> None:
             f"{data_dir / GROUND_TRUTH_FILE} not found, nothing to compare with", EXIT_USAGE
         )
     _, _, _, findings = _load(data_dir, None, ModuleName.all)
-    found = {(f.rule_id, f.entity) for f in findings}
-    expected = {(i["rule_id"], i["entity"]) for i in truth["issues"]}
-    typer.echo(_ground_truth_report(truth, found, expected))
-    if found != expected:
+    comparison = compare_ground_truth(truth, findings)
+    typer.echo(ground_truth_report(comparison))
+    if not comparison.is_exact:
         raise typer.Exit(EXIT_FAILED)
 
 
@@ -824,6 +743,105 @@ def benford(
             for r in table.itertuples(index=False)
         ]
         typer.echo(text_table(["digit", "expected", "observed", "count", "z"], rows))
+
+
+DASHBOARD_APP = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
+"""The Streamlit app in the repository checkout (`<repository root>/dashboard/app.py`)."""
+DASHBOARD_PACKAGES = ("streamlit", "plotly")
+DASHBOARD_EXTRA_HINT = (
+    "awb dashboard needs the optional extra 'dashboard' (streamlit and plotly). "
+    "Install it with: uv sync --extra dashboard  or  pip install 'audit-workbench[dashboard]'"
+)
+
+
+def _missing_dashboard_packages() -> list[str]:
+    return [name for name in DASHBOARD_PACKAGES if importlib.util.find_spec(name) is None]
+
+
+@app.command()
+def dashboard(
+    data_dir: Annotated[
+        Path | None,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Folder with the input CSVs. Without it a bank is generated from --seed.",
+        ),
+    ] = None,
+    seed: Annotated[
+        int | None,
+        typer.Option(
+            "--seed",
+            help=f"Seed of the generated bank (default {DEFAULT_SEED}); not used with DATA_DIR.",
+        ),
+    ] = None,
+    port: Annotated[int, typer.Option("--port", min=1, max=65535, help="Port to serve on.")] = 8501,
+    host: Annotated[str, typer.Option("--host", help="Address to listen on.")] = "127.0.0.1",
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Do not open a browser window.")
+    ] = False,
+    as_of: AsOfOption = None,
+    module: Annotated[
+        ModuleName,
+        typer.Option(
+            "--module", help="Run module A (access), B (journal), C (change), X (cross) or all."
+        ),
+    ] = ModuleName.all,
+) -> None:
+    """Open the run in a dashboard: overview, drill-down, role graph, Benford, cross-module.
+
+    Starts Streamlit as a subprocess and prints the URL. It reads DATA_DIR with the same
+    loader and rules as `awb run`; without DATA_DIR it generates the synthetic bank for
+    --seed in a temporary folder (about 3 seconds). --as-of and --module mean what they mean
+    in `awb run`. The dashboard is read-only and writes nothing. It needs the optional extra
+    'dashboard' (uv sync --extra dashboard). Press Ctrl+C to stop it.
+    """
+    if data_dir is not None and seed is not None:
+        raise _fail("--seed only applies when no DATA_DIR is given", EXIT_USAGE)
+    try:
+        chosen_seed = parse_seed(DEFAULT_SEED if seed is None else seed)
+    except InvalidSeedError as exc:
+        raise _fail(str(exc), EXIT_USAGE) from exc
+    missing = _missing_dashboard_packages()
+    if missing:
+        raise _fail(f"{DASHBOARD_EXTRA_HINT} (missing: {', '.join(missing)})", EXIT_USAGE)
+    if not DASHBOARD_APP.is_file():
+        raise _fail(
+            f"{DASHBOARD_APP} not found; the dashboard app is part of the repository "
+            "checkout, not of the installed package",
+            EXIT_USAGE,
+        )
+    env = {
+        **os.environ,
+        "AWB_DASHBOARD_DATA_DIR": str(data_dir) if data_dir is not None else "",
+        "AWB_DASHBOARD_SEED": str(chosen_seed),
+        "AWB_DASHBOARD_AS_OF": as_of.date().isoformat() if as_of else "",
+        "AWB_DASHBOARD_MODULE": module.value,
+    }
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(DASHBOARD_APP),
+        "--server.port",
+        str(port),
+        "--server.address",
+        host,
+        "--server.headless",
+        "true" if no_browser else "false",
+        "--browser.gatherUsageStats",
+        "false",
+    ]
+    typer.echo(f"Dashboard: http://{host}:{port}  (Ctrl+C to stop)")
+    try:
+        completed = subprocess.run(command, env=env, check=False)
+    except KeyboardInterrupt:
+        return
+    if completed.returncode != 0:
+        raise typer.Exit(completed.returncode)
 
 
 if __name__ == "__main__":  # pragma: no cover

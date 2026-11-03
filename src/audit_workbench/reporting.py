@@ -8,6 +8,8 @@ They do not depend on the command line framework.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -88,6 +90,154 @@ def text_table(headers: list[str], rows: list[list[str]]) -> str:
     lines.append("  ".join("-" * w for w in widths))
     lines += ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip() for r in rows]
     return "\n".join(lines)
+
+
+def md_cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def md_table(headers: list[str], rows: list[list[str]]) -> str:
+    lines = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
+    lines += ["| " + " | ".join(md_cell(c) for c in row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def findings_markdown(findings: list[Finding]) -> str:
+    """The findings as the GitHub-markdown table `awb run --format markdown` prints."""
+    if not findings:
+        return "No findings."
+    rows = [
+        [f.finding_id, module_of(f.rule_id), f.rule_id, f.severity.name, f.entity, f.description]
+        for f in findings
+    ]
+    return md_table(["finding_id", "module", "rule", "severity", "entity", "description"], rows)
+
+
+def percent(numerator: int, denominator: int) -> str:
+    return "n/a" if denominator == 0 else f"{100 * numerator / denominator:.1f}%"
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return None if denominator == 0 else numerator / denominator
+
+
+@dataclass(frozen=True)
+class GroundTruthComparison:
+    """Findings against the issues planted in `ground_truth.json`, as sets of (rule, entity).
+
+    `awb check-ground-truth` and the dashboard both use this, so they cannot disagree.
+    """
+
+    truth: dict[str, Any]
+    expected: frozenset[tuple[str, str]]
+    found: frozenset[tuple[str, str]]
+
+    @property
+    def matched(self) -> frozenset[tuple[str, str]]:
+        return self.expected & self.found
+
+    @property
+    def missed(self) -> frozenset[tuple[str, str]]:
+        """Planted but not found."""
+        return self.expected - self.found
+
+    @property
+    def unexpected(self) -> frozenset[tuple[str, str]]:
+        """Found but not planted."""
+        return self.found - self.expected
+
+    @property
+    def is_exact(self) -> bool:
+        return self.expected == self.found
+
+    @property
+    def recall(self) -> float | None:
+        """Share of the planted issues that were found; None if nothing was planted."""
+        return _ratio(len(self.matched), len(self.expected))
+
+    @property
+    def precision(self) -> float | None:
+        """Share of the findings that were planted; None if there are no findings."""
+        return _ratio(len(self.matched), len(self.found))
+
+
+def compare_ground_truth(
+    truth: dict[str, Any], findings: Iterable[Finding], module: ModuleName = ModuleName.all
+) -> GroundTruthComparison:
+    """Compare findings with the planted issues; `module` limits the planted issues to the
+    modules that were run, so a single-module run is not blamed for the others."""
+    found = frozenset((f.rule_id, f.entity) for f in findings)
+    expected = frozenset(
+        (i["rule_id"], i["entity"])
+        for i in truth["issues"]
+        if module is ModuleName.all or module_of(i["rule_id"]) == module.value.upper()
+    )
+    return GroundTruthComparison(truth=truth, expected=expected, found=found)
+
+
+def ground_truth_report(comparison: GroundTruthComparison) -> str:
+    """The GitHub-markdown report of `awb check-ground-truth`."""
+    truth, expected, found = comparison.truth, comparison.expected, comparison.found
+    rule_ids = all_rule_ids(ModuleName.all, *(r for r, _ in expected | found))
+    rows: list[list[str]] = []
+    totals: dict[str, list[int]] = {}
+    for rule_id in rule_ids:
+        module = module_of(rule_id)
+        exp = {e for r, e in expected if r == rule_id}
+        got = {e for r, e in found if r == rule_id}
+        hits = len(exp & got)
+        t = totals.setdefault(module, [0, 0, 0])
+        t[0] += len(exp)
+        t[1] += len(got)
+        t[2] += hits
+        rows.append(
+            [module, rule_id, rule_title(rule_id), str(len(exp)), str(len(got)), str(hits)]
+            + [percent(hits, len(exp)), percent(hits, len(got))]
+        )
+    for module, (exp_n, got_n, hit_n) in sorted(totals.items()):
+        rows.append(
+            [module, f"**Total {module}**", "", str(exp_n), str(got_n), str(hit_n)]
+            + [percent(hit_n, exp_n), percent(hit_n, got_n)]
+        )
+    hits = len(expected & found)
+    rows.append(
+        ["", "**Total**", "", str(len(expected)), str(len(found)), str(hits)]
+        + [percent(hits, len(expected)), percent(hits, len(found))]
+    )
+    verdict = "PASS" if comparison.is_exact else "FAIL"
+    as_of_b = truth.get("journal_as_of", truth.get("as_of"))
+    as_of_c = truth.get("change_as_of", truth.get("as_of"))
+    out = [
+        "## Ground-truth check",
+        "",
+        f"- Seed: {truth.get('seed')}",
+        f"- As of module A: {truth.get('as_of')}",
+        f"- As of module B: {as_of_b}",
+        f"- As of module C: {as_of_c}",
+        f"- Result: **{verdict}**",
+        "",
+        md_table(
+            [
+                "module",
+                "rule",
+                "title",
+                "expected",
+                "found",
+                "true positives",
+                "recall",
+                "precision",
+            ],
+            rows,
+        ),
+    ]
+    for heading, items in (
+        ("Missed (expected, not found)", expected - found),
+        ("Unexpected (found, not expected)", found - expected),
+    ):
+        if items:
+            out += ["", f"### {heading}", ""]
+            out += [f"- `{rule}` `{entity}`" for rule, entity in sorted(items)]
+    return "\n".join(out)
 
 
 def money(cents: int) -> str:
