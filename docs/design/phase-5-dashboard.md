@@ -199,3 +199,40 @@ into `reporting.py` so the CLI and the dashboard cannot drift apart.
 - **E6 Screenshots.** One screenshot per view in the README (five images) or a
   single overview screenshot with a link. Recommendation: overview plus the
   role graph, the other three as text links.
+
+## 11. Deployment (build step 6), checked 2026-11-04
+
+Deployed to Streamlit Community Cloud from `main`, main file
+`dashboard/app.py`: <https://audit-workbench.streamlit.app>.
+
+What the deployment showed:
+
+- Community Cloud found three dependency files and used
+  `dashboard/requirements.txt`, as intended (its log warns about the other two,
+  `uv.lock` and `pyproject.toml`).
+- The server runs Python 3.14.10. Streamlit replaced pyarrow 26.0.1 with 24.0.0
+  because of a known crash in 26 (apache/arrow#50471). A local environment with
+  the same versions and a non-editable install runs the app without error.
+- The regulation quotes appear in the live drill-down, so `mapping.yaml` is
+  found on the server.
+- The app had to be set to public (Settings, Sharing). Before that, every
+  request without a Streamlit login was answered with 401.
+- After several restarts the browser held an old frontend build and showed
+  "error loading dynamically imported module" on every widget. A hard reload
+  fixed it; the Python side had run correctly the whole time.
+
+Checked on the live URL with a headless browser (after the public redirect had
+set the session cookie):
+
+- Seed 7 overview: 131 findings, 7 CRITICAL, 27 of 27 rules, 123 entities,
+  131 of 131 injected issues matched, 0 without a ground-truth counterpart.
+  These are the numbers `awb run` and `awb check-ground-truth` give locally.
+- All five pages render without an exception or error box. Module drill-down
+  opens finding 98d47d38be3341e4 (A-05) with its regulation quotes, role graph
+  and Benford show their charts, cross-module lists the X chains.
+- Both downloads work: `findings.csv` and `findings.md`, 131 findings each.
+- `?seed=11` generates and runs another bank. It shows the same counts as
+  seed 7, because every seed plants the same number of issues; the finding ids
+  differ.
+- `?seed=abc` is rejected with "invalid seed 'abc': use a whole number from 0
+  to 2147483647".

@@ -7,7 +7,7 @@
 
 Data-driven IT audit tests for banks: access review, segregation of duties, journal entry testing and change management. Everything runs on a synthetic bank with known, injected issues, so every detection rule can be checked against ground truth.
 
-> **Status:** modules A (access review and segregation of duties), B (journal entry testing), C (change management) and X (cross-module cases) are complete, and so are the audit workpaper (DOCX and PDF) and the dashboard (Streamlit). The public live demo follows.
+> **Status:** modules A (access review and segregation of duties), B (journal entry testing), C (change management) and X (cross-module cases) are complete, and so are the audit workpaper (DOCX and PDF) and the dashboard (Streamlit). Live demo on seed 7: [audit-workbench.streamlit.app](https://audit-workbench.streamlit.app).
 
 ## Scope and boundaries
 
@@ -173,7 +173,7 @@ Five pages, all taken from one `Run`:
 
 Both screenshots come from a real run (`awb dashboard`, seed 7). The sidebar offers the findings as CSV and as the markdown table `awb run --format markdown` prints, generated in memory; the dashboard is read-only and writes nothing. The code is split so the logic is testable without a browser: `src/audit_workbench/dashboard/views.py` turns a run into plain data (dataclasses and pandas frames, no Streamlit import, guarded by a test) and `dashboard/app.py` only renders it. `dashboard/requirements.txt` pins the versions for the cloud build.
 
-<!-- TODO(build step 6): add the live demo link here once the app is deployed to Streamlit Community Cloud and the numbers on the URL are checked against seed 7. -->
+**Live demo:** [audit-workbench.streamlit.app](https://audit-workbench.streamlit.app) runs the same app on seed 7 on Streamlit Community Cloud, installed from `dashboard/requirements.txt`. An unused app on the free tier goes to sleep; the first visit then wakes it, which takes a minute or two before the bank is generated. A different seed works through the URL, for example `?seed=11`.
 
 ### The synthetic bank (all modules)
 
@@ -281,6 +281,8 @@ Modul C prüft das Change-Management nach DORA Art. 9 Abs. 4 Buchst. e und Art. 
 Modul X verbindet die drei Datenbestände. Es fragt, ob ein Risiko tatsächlich genutzt wurde: Hat ein Mitarbeiter mit zwei unvereinbaren Funktionen dieselbe Buchung erfasst und freigegeben? Hat ein Konto gehandelt, ohne an diesem Tag das Recht dazu zu haben? War ein ausgeschiedener Mitarbeiter nach seinem letzten Arbeitstag noch aktiv? Maßgeblich ist immer der Tag der Handlung, nicht der Prüfungsstichtag.
 
 Zu jedem Fund nennt das Werkzeug die einschlägige Vorschrift mit wörtlichem Zitat und amtlicher Fundstelle, zum Beispiel DORA Art. 9 Abs. 4 Buchst. c. Die Zitate liegen als Text in `regulation/sources/` und werden bei jedem Testlauf gegen das Zitat in der Zuordnung geprüft. Für Kontrollen, die keine Regel prüfen kann (etwa ob der Nachweis im Change-Ticket ausreicht), zieht `awb sample` eine Stichprobe aus einer Population; `awb sample-size` berechnet den Stichprobenumfang auch ohne Daten. Die Stichprobendatei hält Population, Prüfsumme der Eingabedatei, Umfang, Seed und alle Parameter fest und ist damit reproduzierbar.
+
+`awb workpaper` schreibt aus einem Prüflauf ein Arbeitspapier als Word- und PDF-Datei. Der Aufbau folgt ISA 230: Datenbasis mit Prüfsummen, Prüfschritte, Ergebnisse, Befunde, Stichproben und Abzeichnung. Schlussfolgerungen und die Felder für die Durchsicht bleiben leer, sie füllt der Prüfer aus. `awb dashboard` zeigt dieselben Ergebnisse im Browser, mit Rollengraph, Benford-Diagrammen und den modulübergreifenden Fällen. Eine Live-Demo läuft unter [audit-workbench.streamlit.app](https://audit-workbench.streamlit.app).
 
 Alle Daten sind künstlich erzeugt. Echte Daten kommen nicht vor. Die Prüfregeln beruhen nur auf öffentlichen Quellen, nicht auf der Methodik einer Prüfungsgesellschaft.
 
