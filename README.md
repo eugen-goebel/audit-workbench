@@ -258,7 +258,7 @@ The posting right is not in the assigned role itself. It comes from `R-GL-CLERK`
 | B | Journal entry testing | done |
 | C | Change management | done |
 | D | Cross-module findings, sampling, DORA mapping | done |
-| E | Audit workpaper (DOCX/PDF), dashboard, API and Docker | workpaper and dashboard done (live demo to follow), API and Docker later |
+| E | Audit workpaper (DOCX/PDF), dashboard and live demo | done; an HTTP API and a Docker image were specified and deliberately not built ([why](docs/design/phase-5-api-docker.md)) |
 
 ## Development
 

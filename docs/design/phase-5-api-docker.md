@@ -3,7 +3,23 @@
 Design spec for the last part of phase 5. Code and tests are built against this
 document. If code and spec disagree, the spec is fixed first.
 
-Status: draft 2026-11-04, waiting for approval.
+Status: **not built**, decided 2026-11-04 (Eugen). The spec stays as the record
+of what was considered and why it was left out:
+
+- The audience is IT auditors, audit leads and recruiters in banking. For them
+  the value lies in the rules with measured recall, the regulation quotes, the
+  ISA 230 workpaper and the dashboard, all done; the live demo needs no
+  installation at all.
+- The API would add no rule, no data and no number, only a second way to read
+  the same results.
+- Docker cannot be built on the development machine, so every defect would
+  surface only in CI.
+- Both would add lasting maintenance: another CI job, more dependencies, more
+  update pull requests.
+
+The plan allowed this part of phase 5 to be cut without losing the core. If a
+real consumer appears (a GRC import, a bank's CI gate), this spec is the
+starting point; decisions F1 to F5 below were never taken.
 
 ## 0. Why
 
